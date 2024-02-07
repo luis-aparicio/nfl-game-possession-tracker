@@ -6,4 +6,9 @@ node_modules
 
 # Generated files
 .psci
+.psc*
+.purs*
 output
+
+dist/index.js
+package-lock.json
