@@ -12,3 +12,4 @@ output
 
 dist/index.js
 package-lock.json
+.env

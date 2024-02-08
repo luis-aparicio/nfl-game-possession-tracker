@@ -2,9 +2,9 @@
   "private": true,
   "devDependencies": {
     "esbuild": "^0.14.38",
-    "spago": "^0.20.8",
+    "spago": "^0.20.0",
     "purs-backend-es": "^1.1.0",
-    "purescript": "^0.15.13"
+    "purescript": "^0.14.1"
   },
   "scripts": {
     "postinstall": "spago install",
