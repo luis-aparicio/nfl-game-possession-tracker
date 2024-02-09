@@ -13,3 +13,4 @@ output
 dist/index.js
 package-lock.json
 .env
+.vscode/settings.json
