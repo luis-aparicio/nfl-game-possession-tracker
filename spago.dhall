@@ -16,7 +16,6 @@ You can edit this file as you like.
   , "halogen-subscriptions"
   , "maybe"
   , "prelude"
-  , "psci-support"
   , "random"
   , "tailrec"
   , "transformers"

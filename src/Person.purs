@@ -23,7 +23,8 @@ import Foreign.Generic (decodeJSON, genericDecode)
 import Foreign.Generic.Class (class Decode, Options, SumEncoding(..))
 import Halogen as H
 import Halogen.HTML as HH
-import Halogen.HTML.Properties as HP
+import Halogen.HTML.Events (onClick) as HP
+import Halogen.HTML.Properties (style) as HP
 import Halogen.Subscription as HS
 
 type InputKey = String
@@ -36,9 +37,11 @@ type State =
   , currentPerson :: String
   , allPeople :: Array String
   , winners :: Array String
+  , ballPossessionHistory :: Array String
+  , renderSurrenderButton :: Boolean
   }
-
-data Action = Initialize | Tick
+  
+data Action = Initialize | Tick | SurrenderPossession
 
 component :: forall query input output m. MonadAff m => H.Component query input output m
 component = H.mkComponent
@@ -55,68 +58,76 @@ initialState _ =
   { time: 0
   , situation: Nothing
   , currentPerson: "Nobody"
-  , allPeople: [ "Billy", "Bob", "Joe", "Jane", "Carl" ]
+  , allPeople:
+      [ -- All people here 
+      ]
   , winners: []
+  , ballPossessionHistory: []
+  , renderSurrenderButton: true
   }
 
 render :: forall m. State -> H.ComponentHTML Action () m
 render state = HH.div_
   [ HH.div
-      [ HP.style "margin: auto; width: 50%; border: 3px solid green; padding: 10px;"
+      [ HP.style "margin: auto; width: 50%; border: 3px solid green; padding: 10px; text-align: center;"
       ]
       [ HH.h1
           [ HP.style "font-size: 128px; text-align: center" ]
           [ HH.text state.currentPerson ]
+      , if state.renderSurrenderButton then
+          HH.button
+            [ HP.style "font-size: 24px; margin: 0 auto; display: block;"
+            , HP.onClick \_ -> SurrenderPossession
+            ]
+            [ HH.text "Surrender Possession" ]
+        else
+          HH.text ""
       ]
   , HH.div
       [ HP.style "margin: auto; width: 50%; border: 3px solid red; padding: 10px;" ]
-      [ HH.ul [ HP.style "" ] (cons (HH.div [ HP.style "font-size: 24px" ] [ HH.text "Waiting: " ]) (map renderItem (filter ((/=) state.currentPerson) state.allPeople))) ]
+      [ HH.ul [ HP.style "text-align: center" ] (cons (HH.div [ HP.style "font-size: 24px" ] [ HH.text "Waiting: " ]) (map renderItem (filter ((/=) state.currentPerson) state.allPeople))) ]
   , HH.div
       [ HP.style "margin: auto; width: 50%; border: 3px solid blue; padding: 10px;" ]
-      [ HH.ul [ HP.style "" ] (cons (HH.div [ HP.style "font-size: 24px" ] [ HH.text "Winners: " ]) (map renderItem state.winners)) ]
+      [ HH.ul [ HP.style "text-align: center" ] (cons (HH.div [ HP.style "font-size: 24px" ] [ HH.text "Winners: " ]) (map renderItem state.winners)) ]
   , HH.div
       [ HP.style "margin: auto; width: 50%; padding: 10px;"
       ]
       [ HH.h1
           [ HP.style "font-size: 52px; text-align: center" ]
-          [ HH.text $ "Next Update: " <> show (30 - state.time) ]
+          [ HH.text $ "Next Update: " <> show (45 - state.time) ]
       ]
   ]
   where
-  renderItem person = HH.li [ HP.style "font-size: 24px; list-style-type: '- '" ] [ HH.text person ]
+  renderItem person = HH.div [ HP.style "font-size: 24px" ] [ HH.text person ]
 
 handleAction :: forall output m. MonadAff m => Action -> H.HalogenM State Action () output m Unit
 handleAction = case _ of
   Initialize -> do
     currentState <- H.get
     _ <- H.subscribe =<< timer Tick
-    maybeRes <- H.liftAff $ getSituation' testJSON1
+    maybeRes <- H.liftAff getSituation
     case maybeRes of
       Just (Response { situation }) -> do
         randPerson <- liftEffect $ pickRandomPerson currentState
-        H.modify_ \state ->
-          { time: state.time
-          , situation: Just situation
-          , currentPerson: randPerson
-          , allPeople: state.allPeople
-          , winners: state.winners
+        H.modify_ \state -> state
+          { situation = Just situation
+          , currentPerson = randPerson
+          , ballPossessionHistory = cons randPerson state.ballPossessionHistory
           }
       Nothing -> pure unit
     pure unit
 
   Tick -> do
     currentState <- H.get
-    when (length currentState.winners == 4) $
-      H.modify_ \state ->
-        { time: 0
-        , situation: state.situation
-        , currentPerson: "Nobody"
-        , allPeople: state.allPeople
-        , winners: state.winners
+    when (length currentState.winners == 5) $
+      H.modify_ \state -> state
+        { time = 0
+        , currentPerson = "Game Over"
         }
-    if currentState.time == 10 then do
+
+    if currentState.time == 45 then do
       liftEffect $ log $ show currentState
-      maybeRes <- H.liftAff $ getSituation' testJSON3
+      maybeRes <- H.liftAff getSituation
       case maybeRes of
         Just (Response { situation }) -> do
           let
@@ -124,52 +135,46 @@ handleAction = case _ of
             (Possession { name }) = getPossession situation
           randPerson <- liftEffect $ pickRandomPerson currentState
           if oldName /= name then
-            H.modify_ \state ->
-              { time: 0
-              , situation: Just situation
-              , currentPerson: randPerson
-              , allPeople: state.allPeople
-              , winners: state.winners
+            H.modify_ _
+              { time = 0
+              , situation = Just situation
+              , currentPerson = randPerson
+              , ballPossessionHistory = cons randPerson currentState.ballPossessionHistory
+              , renderSurrenderButton = true
               }
           else
-            H.modify_ \state ->
-              { time: 0
-              , situation: Just situation
-              , currentPerson: state.currentPerson
-              , allPeople: state.allPeople
-              , winners: state.winners
+            H.modify_ _
+              { time = 0
+              , situation = Just situation
               }
           cs <- H.get
-          when (map getClock cs.situation == Just "00:00") do
-            H.modify_ \state ->
-              { time: state.time
-              , situation: state.situation
-              , currentPerson: randPerson
-              , allPeople: filter ((/=) state.currentPerson) state.allPeople
-              , winners: cons
+          when (map getClock cs.situation == Just "00:00" || map getClock cs.situation == Just "15:00") do
+            H.modify_ \state -> state
+              { currentPerson = randPerson
+              , allPeople = filter ((/=) state.currentPerson) state.allPeople
+              , winners = cons
                   ( "Q"
                       <> show ((length state.winners) + 1)
                       <> " "
                       <> state.currentPerson
                   )
                   state.winners
+              , ballPossessionHistory = cons randPerson state.ballPossessionHistory
+              , renderSurrenderButton = true
               }
         Nothing -> do
           liftEffect $ log $ "No API Response"
-          H.modify_ \state ->
-            { time: -60
-            , situation: state.situation
-            , currentPerson: state.currentPerson
-            , allPeople: state.allPeople
-            , winners: state.winners
-            }
+          H.modify_ _ { time = -60 }
           pure unit
-    else H.modify_ \state ->
-      { time: state.time + 1
-      , situation: state.situation
-      , currentPerson: state.currentPerson
-      , allPeople: state.allPeople
-      , winners: state.winners
+    else H.modify_ \state -> state { time = state.time + 1 }
+
+  SurrenderPossession -> do
+    currentState <- H.get
+    randPerson <- liftEffect $ pickRandomPerson currentState
+    H.modify_ \state -> state 
+      { renderSurrenderButton = false 
+      , currentPerson = randPerson
+      , ballPossessionHistory = cons randPerson state.ballPossessionHistory
       }
 
 timer :: forall m a. MonadAff m => a -> m (HS.Emitter a)
@@ -180,8 +185,9 @@ timer val = do
     H.liftEffect $ HS.notify listener val
   pure emitter
 
+-- 2025
 superBowlGameId :: String
-superBowlGameId = "902a4753-72f9-4868-9d9b-193a5c41ea4d"
+superBowlGameId = "ca9d8f84-8e7b-4ee7-a310-54c2e3ca4edc"
 
 testGameId :: String
 testGameId = "7d06369a-382a-448a-b295-6da9eab53245"
