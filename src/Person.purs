@@ -6,10 +6,11 @@ import Affjax as Ajax
 import Affjax.ResponseFormat as ResponseFormat
 import Affjax.Web as AffjaxWeb
 import Control.Monad.Rec.Class (forever)
-import Data.Array (length, (!!), filter, cons)
+import Data.Array (length, (!!), filter, cons, snoc, deleteAt, mapWithIndex, any)
 import Data.Either (Either(..))
 import Data.Generic.Rep (class Generic)
 import Data.Maybe (Maybe(..), fromMaybe, maybe)
+import Data.String (trim)
 import Data.Show.Generic (genericShow)
 import Effect (Effect)
 import Effect.Aff (Aff, Milliseconds(..))
@@ -24,8 +25,9 @@ import Data.Argonaut.Parser (jsonParser)
 import Data.Argonaut.Core (caseJsonObject)
 import Halogen as H
 import Halogen.HTML as HH
-import Halogen.HTML.Events (onClick) as HP
-import Halogen.HTML.Properties (style) as HP
+import Halogen.HTML.Events (onClick, onValueInput, onKeyDown) as HP
+import Halogen.HTML.Properties (style, value, placeholder) as HP
+import Web.UIEvent.KeyboardEvent (key)
 import Halogen.Subscription as HS
 import Config as Config
 
@@ -41,9 +43,18 @@ type State =
   , winners :: Array String
   , ballPossessionHistory :: Array String
   , renderSurrenderButton :: Boolean
+  , gameStarted :: Boolean
+  , newParticipantName :: String
   }
   
-data Action = Initialize | Tick | SurrenderPossession
+data Action 
+  = Initialize 
+  | Tick 
+  | SurrenderPossession
+  | UpdateParticipantName String
+  | AddParticipant
+  | RemoveParticipant Int
+  | StartGame
 
 component :: forall query input output m. MonadAff m => H.Component query input output m
 component = H.mkComponent
@@ -60,67 +71,167 @@ initialState _ =
   { time: 0
   , situation: Nothing
   , currentPerson: "Nobody"
-  , allPeople:
-      [ -- All people here 
-      ]
+  , allPeople: []
   , winners: []
   , ballPossessionHistory: []
   , renderSurrenderButton: true
+  , gameStarted: false
+  , newParticipantName: ""
   }
 
 render :: forall m. State -> H.ComponentHTML Action () m
-render state = HH.div_
-  [ HH.div
-      [ HP.style "margin: auto; width: 50%; border: 3px solid green; padding: 10px; text-align: center;"
-      ]
-      [ HH.h1
-          [ HP.style "font-size: 128px; text-align: center" ]
-          [ HH.text state.currentPerson ]
-      , if state.renderSurrenderButton then
-          HH.button
-            [ HP.style "font-size: 24px; margin: 0 auto; display: block;"
-            , HP.onClick \_ -> SurrenderPossession
-            ]
-            [ HH.text "Surrender Possession" ]
-        else
-          HH.text ""
-      ]
-  , HH.div
-      [ HP.style "margin: auto; width: 50%; border: 3px solid red; padding: 10px;" ]
-      [ HH.ul [ HP.style "text-align: center" ] (cons (HH.div [ HP.style "font-size: 24px" ] [ HH.text "Waiting: " ]) (map renderItem (filter ((/=) state.currentPerson) state.allPeople))) ]
-  , HH.div
-      [ HP.style "margin: auto; width: 50%; border: 3px solid blue; padding: 10px;" ]
-      [ HH.ul [ HP.style "text-align: center" ] (cons (HH.div [ HP.style "font-size: 24px" ] [ HH.text "Winners: " ]) (map renderItem state.winners)) ]
-  , HH.div
-      [ HP.style "margin: auto; width: 50%; padding: 10px;"
-      ]
-      [ HH.h1
-          [ HP.style "font-size: 52px; text-align: center" ]
-          [ HH.text $ "Next Update: " <> show (45 - state.time) ]
-      ]
-  ]
+render state = 
+  if state.gameStarted then
+    renderGame state
+  else
+    renderSetup state
   where
+  renderGame state' = HH.div_
+    [ HH.div
+        [ HP.style "margin: auto; width: 50%; border: 3px solid green; padding: 10px; text-align: center;"
+        ]
+        [ HH.h1
+            [ HP.style "font-size: 128px; text-align: center" ]
+            [ HH.text state'.currentPerson ]
+        , if state'.renderSurrenderButton then
+            HH.button
+              [ HP.style "font-size: 24px; margin: 0 auto; display: block;"
+              , HP.onClick \_ -> SurrenderPossession
+              ]
+              [ HH.text "Surrender Possession" ]
+          else
+            HH.text ""
+        ]
+    , HH.div
+        [ HP.style "margin: auto; width: 50%; border: 3px solid red; padding: 10px;" ]
+        [ HH.ul [ HP.style "text-align: center" ] (cons (HH.div [ HP.style "font-size: 24px" ] [ HH.text "Waiting: " ]) (map renderItem (filter ((/=) state'.currentPerson) state'.allPeople))) ]
+    , HH.div
+        [ HP.style "margin: auto; width: 50%; border: 3px solid blue; padding: 10px;" ]
+        [ HH.ul [ HP.style "text-align: center" ] (cons (HH.div [ HP.style "font-size: 24px" ] [ HH.text "Winners: " ]) (map renderItem state'.winners)) ]
+    , HH.div
+        [ HP.style "margin: auto; width: 50%; padding: 10px;"
+        ]
+        [ HH.h1
+            [ HP.style "font-size: 52px; text-align: center" ]
+            [ HH.text $ "Next Update: " <> show (45 - state'.time) ]
+        ]
+    ]
+  
+  renderSetup state' = HH.div
+    [ HP.style "margin: auto; width: 80%; max-width: 600px; padding: 20px; text-align: center;"
+    ]
+    [ HH.h1
+        [ HP.style "font-size: 48px; margin-bottom: 30px;" ]
+        [ HH.text "Game Setup" ]
+    , HH.div
+        [ HP.style "margin-bottom: 20px;" ]
+        [ HH.input
+            [ HP.placeholder "Enter participant name"
+            , HP.value state'.newParticipantName
+            , HP.onValueInput UpdateParticipantName
+            , HP.onKeyDown \ev -> if key ev == "Enter" then AddParticipant else Initialize
+            , HP.style "font-size: 20px; padding: 10px; width: 100%; max-width: 400px;"
+            ]
+        , HH.button
+            [ HP.style "font-size: 20px; padding: 10px 20px; margin-left: 10px;"
+            , HP.onClick \_ -> AddParticipant
+            ]
+            [ HH.text "Add" ]
+        ]
+    , HH.div
+        [ HP.style "margin: 20px 0; min-height: 200px; border: 2px solid #ccc; padding: 20px; border-radius: 8px;"
+        ]
+        (if length state'.allPeople == 0 then
+          [ HH.p
+              [ HP.style "font-size: 18px; color: #666;" ]
+              [ HH.text "No participants added yet. Add names above." ]
+          ]
+        else
+          [ HH.h2
+              [ HP.style "font-size: 24px; margin-bottom: 15px;" ]
+              [ HH.text $ "Participants (" <> show (length state'.allPeople) <> ")" ]
+          , HH.ul
+              [ HP.style "list-style: none; padding: 0; text-align: left; max-width: 400px; margin: 0 auto;" ]
+              (mapWithIndex (\idx name -> 
+                HH.li
+                  [ HP.style "font-size: 20px; padding: 8px; margin: 5px 0; background: #f0f0f0; border-radius: 4px; display: flex; justify-content: space-between; align-items: center;"
+                  ]
+                  [ HH.span [] [ HH.text name ]
+                  , HH.button
+                      [ HP.style "font-size: 16px; padding: 5px 10px; background: #ff4444; color: white; border: none; border-radius: 4px; cursor: pointer;"
+                      , HP.onClick \_ -> RemoveParticipant idx
+                      ]
+                      [ HH.text "Remove" ]
+                  ]
+              ) state'.allPeople)
+          ])
+    , if length state'.allPeople >= 2 then
+        HH.button
+          [ HP.style "font-size: 24px; padding: 15px 40px; margin-top: 20px; background: #4CAF50; color: white; border: none; border-radius: 8px; cursor: pointer;"
+          , HP.onClick \_ -> StartGame
+          ]
+          [ HH.text "Start Game" ]
+      else
+        HH.button
+          [ HP.style "font-size: 24px; padding: 15px 40px; margin-top: 20px; background: #cccccc; color: #666; border: none; border-radius: 8px; cursor: not-allowed;"
+          ]
+          [ HH.text "Start Game (Need 2+ participants)" ]
+    , if length state'.allPeople < 2 then
+        HH.p
+          [ HP.style "font-size: 16px; color: #ff4444; margin-top: 10px;" ]
+          [ HH.text "Add at least 2 participants to start the game" ]
+      else
+        HH.text ""
+    ]
+  
   renderItem person = HH.div [ HP.style "font-size: 24px" ] [ HH.text person ]
+  
 
 handleAction :: forall output m. MonadAff m => Action -> H.HalogenM State Action () output m Unit
 handleAction = case _ of
   Initialize -> do
     currentState <- H.get
-    _ <- H.subscribe =<< timer Tick
-    maybeRes <- H.liftAff getSituation
-    case maybeRes of
-      Just (Response { situation }) -> do
-        randPerson <- liftEffect $ pickRandomPerson currentState
-        H.modify_ \state -> state
-          { situation = Just situation
-          , currentPerson = randPerson
-          , ballPossessionHistory = cons randPerson state.ballPossessionHistory
-          }
-      Nothing -> pure unit
+    when currentState.gameStarted do
+      _ <- H.subscribe =<< timer Tick
+      maybeRes <- H.liftAff getSituation
+      case maybeRes of
+        Just (Response { situation }) -> do
+          randPerson <- liftEffect $ pickRandomPerson currentState
+          H.modify_ \state -> state
+            { situation = Just situation
+            , currentPerson = randPerson
+            , ballPossessionHistory = cons randPerson state.ballPossessionHistory
+            }
+        Nothing -> pure unit
     pure unit
+
+  UpdateParticipantName name -> do
+    H.modify_ \state -> state { newParticipantName = name }
+
+  AddParticipant -> do
+    currentState <- H.get
+    let trimmedName = trim currentState.newParticipantName
+    when (trimmedName /= "" && not (any (_ == trimmedName) currentState.allPeople)) do
+      H.modify_ \state -> state
+        { allPeople = snoc state.allPeople trimmedName
+        , newParticipantName = ""
+        }
+
+  RemoveParticipant idx -> do
+    H.modify_ \state -> state
+      { allPeople = fromMaybe state.allPeople $ deleteAt idx state.allPeople
+      }
+
+  StartGame -> do
+    currentState <- H.get
+    when (length currentState.allPeople >= 2) do
+      H.modify_ \state -> state { gameStarted = true }
+      -- Trigger Initialize to start the game
+      handleAction Initialize
 
   Tick -> do
     currentState <- H.get
+    unless currentState.gameStarted $ pure unit
     when (length currentState.winners == 5) $
       H.modify_ \state -> state
         { time = 0
@@ -191,7 +302,7 @@ getSituation :: Aff (Maybe Response)
 getSituation = do
   config <- liftEffect Config.getConfig
   let gameId = Config.getGameId config
-  let apiUrl = "https://api.sportradar.us/nfl/official/trial/v7/en/games/" <> gameId <> "/boxscore.json?api_key=" <> config.apiKey
+  let apiUrl = "/api/nfl/official/trial/v7/en/games/" <> gameId <> "/boxscore.json?api_key=" <> config.apiKey
   result <- Ajax.get
     AffjaxWeb.driver
     ResponseFormat.string
