@@ -18,9 +18,10 @@ import Effect.Aff.Class (class MonadAff)
 import Effect.Class (liftEffect)
 import Effect.Class.Console (log)
 import Effect.Random (randomInt)
-import Data.Argonaut.Decode (class DecodeJson, decodeJson)
-import Data.Argonaut.Decode.Generic (genericDecodeJson)
+import Data.Argonaut.Decode (class DecodeJson, decodeJson, (.:))
+import Data.Argonaut.Decode.Error (JsonDecodeError(..))
 import Data.Argonaut.Parser (jsonParser)
+import Data.Argonaut.Core (caseJsonObject)
 import Halogen as H
 import Halogen.HTML as HH
 import Halogen.HTML.Events (onClick) as HP
@@ -241,13 +242,18 @@ pickRandomPerson state =
 data Response = Response
   { situation :: Situation
   }
+derive instance Generic Response _
 
 instance Show Response where
   show = genericShow
 
-derive instance Generic Response _
 instance DecodeJson Response where
-  decodeJson = genericDecodeJson
+  decodeJson json = caseJsonObject
+    (Left $ TypeMismatch "object")
+    (\obj -> do
+      situation <- obj .: "situation"
+      pure $ Response { situation })
+    json
 
 data Situation = Situation
   { clock :: String
@@ -255,13 +261,21 @@ data Situation = Situation
   , yfd :: Int
   , possession :: Possession
   }
+derive instance Generic Situation _
 
 instance Show Situation where
   show = genericShow
 
-derive instance Generic Situation _
 instance DecodeJson Situation where
-  decodeJson = genericDecodeJson
+  decodeJson json = caseJsonObject
+    (Left $ TypeMismatch "object")
+    (\obj -> do
+      clock <- obj .: "clock"
+      down <- obj .: "down"
+      yfd <- obj .: "yfd"
+      possession <- obj .: "possession"
+      pure $ Situation { clock, down, yfd, possession })
+    json
 
 getPossession :: Situation -> Possession
 getPossession (Situation { possession }) = possession
@@ -277,12 +291,21 @@ newtype Possession = Possession
   , sr_id :: String
   }
 
-instance showPossession :: Show Possession where
+instance Show Possession where
   show = genericShow
 
-derive instance genericPossession :: Generic Possession _
+derive instance Generic Possession _
 instance DecodeJson Possession where
-  decodeJson = genericDecodeJson
+  decodeJson json = caseJsonObject
+    (Left $ TypeMismatch "object")
+    (\obj -> do
+      id <- obj .: "id"
+      name <- obj .: "name"
+      market <- obj .: "market"
+      alias <- obj .: "alias"
+      sr_id <- obj .: "sr_id"
+      pure $ Possession { id, name, market, alias, sr_id })
+    json
 
 -- {
 --   "situation": {
@@ -306,81 +329,3 @@ instance DecodeJson Possession where
 --       }
 --   }
 -- }
-
-testJSON1 :: String
-testJSON1 =
-  """
-{ "situation": {
-      "clock": "25:00",
-      "down": 1,
-      "yfd": 10,
-      "possession": {
-          "id": "3d08af9e-c767-4f88-a7dc-b920c6d2b4a8",
-          "name": "Seahawks",
-          "market": "Seattle",
-          "alias": "SEA",
-          "sr_id": "sr:competitor:4430"
-      },
-      "location": {
-          "id": "3d08af9e-c767-4f88-a7dc-b920c6d2b4a8",
-          "name": "Seahawks",
-          "market": "Seattle",
-          "alias": "SEA",
-          "sr_id": "sr:competitor:4430",
-          "yardline": 40
-      }
-  }
-}
-"""
-
-testJSON2 :: String
-testJSON2 =
-  """
-{ "situation": {
-      "clock": "13:00",
-      "down": 1,
-      "yfd": 10,
-      "possession": {
-          "id": "3d08af9e-c767-4f88-a7dc-b920c6d2b4a8",
-          "name": "Chiefs",
-          "market": "Seattle",
-          "alias": "SEA",
-          "sr_id": "sr:competitor:4430"
-      },
-      "location": {
-          "id": "3d08af9e-c767-4f88-a7dc-b920c6d2b4a8",
-          "name": "Seahawks",
-          "market": "Seattle",
-          "alias": "SEA",
-          "sr_id": "sr:competitor:4430",
-          "yardline": 40
-      }
-  }
-}
-"""
-
-testJSON3 :: String
-testJSON3 =
-  """
-{ "situation": {
-      "clock": "00:00",
-      "down": 1,
-      "yfd": 10,
-      "possession": {
-          "id": "3d08af9e-c767-4f88-a7dc-b920c6d2b4a8",
-          "name": "Seahawks",
-          "market": "Seattle",
-          "alias": "SEA",
-          "sr_id": "sr:competitor:4430"
-      },
-      "location": {
-          "id": "3d08af9e-c767-4f88-a7dc-b920c6d2b4a8",
-          "name": "Seahawks",
-          "market": "Seattle",
-          "alias": "SEA",
-          "sr_id": "sr:competitor:4430",
-          "yardline": 40
-      }
-  }
-}
-"""

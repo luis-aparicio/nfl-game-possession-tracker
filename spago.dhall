@@ -9,7 +9,6 @@ You can edit this file as you like.
   , "affjax-web"
   , "argonaut-codecs"
   , "argonaut-core"
-  , "argonaut-generic"
   , "arrays"
   , "console"
   , "effect"
@@ -19,6 +18,8 @@ You can edit this file as you like.
   , "maybe"
   , "prelude"
   , "random"
+  , "spec"
+  , "spec-node"
   , "tailrec"
   ]
 , packages = ./packages.dhall

@@ -14,3 +14,4 @@ dist/index.js
 package-lock.json
 .env
 .vscode/settings.json
+.spec-results
