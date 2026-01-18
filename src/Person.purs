@@ -4,7 +4,7 @@ import Prelude
 
 import Affjax as Ajax
 import Affjax.ResponseFormat as ResponseFormat
-import Control.Monad.Except (runExcept)
+import Affjax.Web as AffjaxWeb
 import Control.Monad.Rec.Class (forever)
 import Data.Array (length, (!!), filter, cons)
 import Data.Either (Either(..))
@@ -18,9 +18,9 @@ import Effect.Aff.Class (class MonadAff)
 import Effect.Class (liftEffect)
 import Effect.Class.Console (log)
 import Effect.Random (randomInt)
-import Foreign (F)
-import Foreign.Generic (decodeJSON, genericDecode)
-import Foreign.Generic.Class (class Decode, Options, SumEncoding(..))
+import Data.Argonaut.Decode (class DecodeJson, decodeJson)
+import Data.Argonaut.Decode.Generic (genericDecodeJson)
+import Data.Argonaut.Parser (jsonParser)
 import Halogen as H
 import Halogen.HTML as HH
 import Halogen.HTML.Events (onClick) as HP
@@ -195,6 +195,7 @@ testGameId = "7d06369a-382a-448a-b295-6da9eab53245"
 getSituation :: Aff (Maybe Response)
 getSituation = do
   result <- Ajax.get
+    AffjaxWeb.driver
     ResponseFormat.string
     ("https://api.sportradar.us/nfl/official/trial/v7/en/games/" <> superBowlGameId <> "/boxscore.json?api_key=<API_KEY>")
   case result of
@@ -202,19 +203,29 @@ getSituation = do
       liftEffect $ log $ "ERROR: " <> Ajax.printError err
       pure Nothing
     Right { body } ->
-      case runExcept (decodeJSON body :: F Response) of
+      case jsonParser body of
         Left err -> do
-          liftEffect $ log $ "ERROR: " <> show err <> " (" <> body <> ")"
+          liftEffect $ log $ "ERROR: JSON parse failed: " <> err <> " (" <> body <> ")"
           pure Nothing
-        Right res -> pure $ Just res
+        Right json ->
+          case decodeJson json of
+            Left err -> do
+              liftEffect $ log $ "ERROR: Decode failed: " <> show err <> " (" <> body <> ")"
+              pure Nothing
+            Right res -> pure $ Just res
 
 getSituation' :: String -> Aff (Maybe Response)
 getSituation' body = do
-  case runExcept (decodeJSON body :: F Response) of
+  case jsonParser body of
     Left err -> do
-      liftEffect $ log $ "ERROR: " <> show err <> " (" <> body <> ")"
+      liftEffect $ log $ "ERROR: JSON parse failed: " <> err <> " (" <> body <> ")"
       pure Nothing
-    Right res -> pure $ Just res
+    Right json ->
+      case decodeJson json of
+        Left err -> do
+          liftEffect $ log $ "ERROR: Decode failed: " <> show err <> " (" <> body <> ")"
+          pure Nothing
+        Right res -> pure $ Just res
 
 pickRandomPerson :: State -> Effect String
 pickRandomPerson state =
@@ -231,12 +242,12 @@ data Response = Response
   { situation :: Situation
   }
 
-instance showResponse :: Show Response where
+instance Show Response where
   show = genericShow
 
-derive instance genericResponse :: Generic Response _
-instance decodeResponse :: Decode Response where
-  decode = genericDecode decodeOptions
+derive instance Generic Response _
+instance DecodeJson Response where
+  decodeJson = genericDecodeJson
 
 data Situation = Situation
   { clock :: String
@@ -245,12 +256,12 @@ data Situation = Situation
   , possession :: Possession
   }
 
-instance showSituation :: Show Situation where
+instance Show Situation where
   show = genericShow
 
-derive instance genericSituation :: Generic Situation _
-instance decodeSituation :: Decode Situation where
-  decode = genericDecode decodeOptions
+derive instance Generic Situation _
+instance DecodeJson Situation where
+  decodeJson = genericDecodeJson
 
 getPossession :: Situation -> Possession
 getPossession (Situation { possession }) = possession
@@ -270,8 +281,8 @@ instance showPossession :: Show Possession where
   show = genericShow
 
 derive instance genericPossession :: Generic Possession _
-instance decodePossession :: Decode Possession where
-  decode = genericDecode decodeOptions
+instance DecodeJson Possession where
+  decodeJson = genericDecodeJson
 
 -- {
 --   "situation": {
@@ -373,16 +384,3 @@ testJSON3 =
   }
 }
 """
-
-decodeOptions :: Options
-decodeOptions =
-  { sumEncoding:
-      TaggedObject
-        { tagFieldName: "tag"
-        , contentsFieldName: "contents"
-        , constructorTagTransform: identity
-        }
-  , unwrapSingleConstructors: true
-  , unwrapSingleArguments: true
-  , fieldTransform: identity
-  }

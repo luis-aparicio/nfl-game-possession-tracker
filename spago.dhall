@@ -6,19 +6,20 @@ You can edit this file as you like.
 , dependencies =
   [ "aff"
   , "affjax"
+  , "affjax-web"
+  , "argonaut-codecs"
+  , "argonaut-core"
+  , "argonaut-generic"
   , "arrays"
   , "console"
   , "effect"
   , "either"
-  , "foreign"
-  , "foreign-generic"
   , "halogen"
   , "halogen-subscriptions"
   , "maybe"
   , "prelude"
   , "random"
   , "tailrec"
-  , "transformers"
   ]
 , packages = ./packages.dhall
 , sources = [ "src/**/*.purs", "test/**/*.purs" ]
