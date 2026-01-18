@@ -13,14 +13,16 @@ You can edit this file as you like.
   , "console"
   , "effect"
   , "either"
-  , "halogen"
   , "halogen-subscriptions"
+  , "halogen"
   , "maybe"
   , "prelude"
   , "random"
-  , "spec"
   , "spec-node"
+  , "spec"
+  , "strings"
   , "tailrec"
+  , "web-uievents"
   ]
 , packages = ./packages.dhall
 , sources = [ "src/**/*.purs", "test/**/*.purs" ]

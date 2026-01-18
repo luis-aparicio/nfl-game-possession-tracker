@@ -27,6 +27,7 @@ import Halogen.HTML as HH
 import Halogen.HTML.Events (onClick) as HP
 import Halogen.HTML.Properties (style) as HP
 import Halogen.Subscription as HS
+import Config as Config
 
 type InputKey = String
 
@@ -186,19 +187,15 @@ timer val = do
     H.liftEffect $ HS.notify listener val
   pure emitter
 
--- 2025
-superBowlGameId :: String
-superBowlGameId = "ca9d8f84-8e7b-4ee7-a310-54c2e3ca4edc"
-
-testGameId :: String
-testGameId = "7d06369a-382a-448a-b295-6da9eab53245"
-
 getSituation :: Aff (Maybe Response)
 getSituation = do
+  config <- liftEffect Config.getConfig
+  let gameId = Config.getGameId config
+  let apiUrl = "https://api.sportradar.us/nfl/official/trial/v7/en/games/" <> gameId <> "/boxscore.json?api_key=" <> config.apiKey
   result <- Ajax.get
     AffjaxWeb.driver
     ResponseFormat.string
-    ("https://api.sportradar.us/nfl/official/trial/v7/en/games/" <> superBowlGameId <> "/boxscore.json?api_key=<API_KEY>")
+    apiUrl
   case result of
     Left err -> do
       liftEffect $ log $ "ERROR: " <> Ajax.printError err
