@@ -1,49 +1,41 @@
-module Component.Person where
+module Component.Game where
 
 import Prelude
 
-import Affjax as Ajax
-import Affjax.ResponseFormat as ResponseFormat
-import Affjax.Web as AffjaxWeb
 import Control.Monad.Rec.Class (forever)
 import Data.Array (length, (!!), filter, cons, snoc, deleteAt, mapWithIndex, any)
-import Data.Either (Either(..))
-import Data.Generic.Rep (class Generic)
 import Data.Maybe (Maybe(..), fromMaybe, maybe)
 import Data.String (trim)
-import Data.Show.Generic (genericShow)
 import Effect (Effect)
-import Effect.Aff (Aff, Milliseconds(..))
+import Effect.Aff (Milliseconds(..))
 import Effect.Aff as Aff
 import Effect.Aff.Class (class MonadAff)
 import Effect.Class (liftEffect)
 import Effect.Class.Console (log)
 import Effect.Random (randomInt)
-import Data.Argonaut.Decode (class DecodeJson, decodeJson, (.:), (.:?))
-import Data.Argonaut.Decode.Error (JsonDecodeError(..))
-import Data.Argonaut.Parser (jsonParser)
-import Data.Argonaut.Core (caseJsonObject)
 import Halogen as H
 import Halogen.HTML as HH
 import Halogen.HTML.Events (onClick, onValueInput, onKeyDown) as HP
 import Halogen.HTML.Properties (style, value, placeholder) as HP
 import Web.UIEvent.KeyboardEvent (key)
 import Halogen.Subscription as HS
-import Config as Config
+import NFL.Types as NFL
+import NFL.API as NFLAPI
+import Game.Winners as Winners
 
 type State =
   { time :: Int
-  , situation :: Maybe Situation
+  , situation :: Maybe NFL.Situation
   , quarter :: Int
   , status :: String
   , currentPerson :: String
   , allPeople :: Array String
-  , winners :: QuarterWinners
+  , winners :: Winners.QuarterWinners
   , ballPossessionHistory :: Array String
   , renderSurrenderButton :: Boolean
   , showGamePage :: Boolean
   , newParticipantName :: String
-  , gameInfo :: Maybe GameInfo
+  , gameInfo :: Maybe NFL.GameInfo
   }
   
 data Action 
@@ -92,7 +84,7 @@ render state =
     HH.div
       [ HP.style $ baseContainerStyle <> "background: #E8E8E8; min-height: 100vh; padding: 20px;"
       ]
-      [ renderGameHeader gameInfo state'.quarter state'.status (getClock gameInfo situation)
+      [ renderGameHeader gameInfo state'.quarter state'.status (NFLAPI.getClock gameInfo situation)
       , HH.div
           [ HP.style "max-width: 1400px; margin: 0 auto; display: grid; grid-template-columns: 1fr 1fr; gap: 15px; margin-top: 15px; align-items: stretch;"
           ]
@@ -184,14 +176,6 @@ render state =
       ]
   
   baseContainerStyle = "font-family: 'Arial', sans-serif; color: #1a1a1a; "
-  
-  getClock :: Maybe GameInfo -> Maybe Situation -> String
-  getClock gameInfo situation = 
-    case gameInfo of
-      Just { clock } -> clock
-      Nothing -> case situation of
-        Just (Situation { situationClock }) -> situationClock
-        Nothing -> "00:00"
   
   renderGameHeader gameInfo quarter status clock = 
     HH.div
@@ -365,7 +349,6 @@ render state =
               [ HH.text "—" ]
       ]
   
-  
   renderWaitingItem item =
     HH.div
       [ HP.style "background: rgba(255, 255, 255, 0.8); border-radius: 8px; padding: 12px; font-size: 18px; font-weight: bold; text-align: center; border: 1px solid rgba(192, 192, 192, 0.5); color: #1a1a1a;"
@@ -392,7 +375,7 @@ handleAction = case _ of
     currentState <- H.get
     when currentState.showGamePage do
       _ <- H.subscribe =<< timer Tick
-      maybeRes <- H.liftAff getResponse
+      maybeRes <- H.liftAff NFLAPI.getResponse
       case maybeRes of
         Just { situation, status, gameInfo } -> do
           randPerson <- liftEffect $ pickRandomPerson currentState
@@ -434,12 +417,12 @@ handleAction = case _ of
     then pure unit
     else if oldState.time == 45 then do
       liftEffect $ log $ show oldState
-      maybeRes <- H.liftAff getResponse
+      maybeRes <- H.liftAff NFLAPI.getResponse
       case maybeRes of
         Just { situation, status, quarter, gameInfo } -> do
           let
-            oldName = maybe "" ((\(Possession { name }) -> name) <<< getPossession) oldState.situation
-            (Possession { name }) = getPossession situation
+            oldName = maybe "" ((\(NFL.Possession { name }) -> name) <<< NFLAPI.getPossession) oldState.situation
+            (NFL.Possession { name }) = NFLAPI.getPossession situation
           randPerson <- liftEffect $ pickRandomPerson oldState
           if oldName /= name then
             H.modify_ _
@@ -460,11 +443,11 @@ handleAction = case _ of
               , status = status
               , gameInfo = gameInfo
               }
-          when ((oldState.quarter /= quarter) && checkQuarter quarter oldState.winners) do
+          when ((oldState.quarter /= quarter) && Winners.checkQuarter quarter oldState.winners) do
             H.modify_ \state -> state
               { currentPerson = randPerson
               , allPeople = filter ((/=) state.currentPerson) state.allPeople
-              , winners = setWinner state.currentPerson state.winners
+              , winners = Winners.setWinner state.currentPerson state.winners
               , ballPossessionHistory = cons randPerson state.ballPossessionHistory
               , renderSurrenderButton = true
               }
@@ -472,7 +455,7 @@ handleAction = case _ of
             H.modify_ \state -> state
               { currentPerson = "Game Over"
               , allPeople = filter ((/=) state.currentPerson) state.allPeople
-              , winners = setWinner state.currentPerson state.winners
+              , winners = Winners.setWinner state.currentPerson state.winners
               , ballPossessionHistory = cons randPerson state.ballPossessionHistory
               , renderSurrenderButton = false
               }
@@ -499,54 +482,6 @@ timer val = do
     H.liftEffect $ HS.notify listener val
   pure emitter
 
-getResponse :: Aff (Maybe { situation :: Situation, clock :: String, status :: String, quarter :: Int, gameInfo :: Maybe GameInfo })
-getResponse = do
-  config <- liftEffect Config.getConfig
-  let gameId = Config.getGameId config
-      apiUrl = "/api/nfl/official/trial/v7/en/games/" <> gameId <> "/boxscore.json?api_key=" <> config.apiKey
-  result <- Ajax.get
-    AffjaxWeb.driver
-    ResponseFormat.string
-    apiUrl
-  case result of
-    Left err -> do
-      liftEffect $ log $ "ERROR: " <> Ajax.printError err
-      pure Nothing
-    Right { body } ->
-      case jsonParser body of
-        Left err -> do
-          liftEffect $ log $ "ERROR: JSON parse failed: " <> err <> " (" <> body <> ")"
-          pure Nothing
-        Right json ->
-          case decodeJson json of
-            Left err -> do
-              liftEffect $ log $ "ERROR: Decode failed: " <> show err <> " (" <> body <> ")"
-              pure Nothing
-            Right (Response { situation, clock, status, quarter, home, away, scoring }) -> do
-              let gameInfo = buildGameInfo home away scoring clock
-              pure $ Just { situation, clock, status, quarter, gameInfo }
-
-buildGameInfo :: Maybe Team -> Maybe Team -> Maybe Scoring -> String -> Maybe GameInfo
-buildGameInfo home away scoring clock = do
-  (Team { name: homeName }) <- home
-  (Team { name: awayName }) <- away
-  (Scoring { home_points, away_points, periods }) <- scoring
-  let quarterScores = map (\(Period { number, home_points: h, away_points: a }) -> { quarter: number, home: h, away: a }) periods
-  pure { homeTeam: homeName, awayTeam: awayName, homeScore: home_points, awayScore: away_points, clock, quarterScores }
-
-getResponse' :: String -> Aff (Maybe Response)
-getResponse' body = do
-  case jsonParser body of
-    Left err -> do
-      liftEffect $ log $ "ERROR: JSON parse failed: " <> err <> " (" <> body <> ")"
-      pure Nothing
-    Right json ->
-      case decodeJson json of
-        Left err -> do
-          liftEffect $ log $ "ERROR: Decode failed: " <> show err <> " (" <> body <> ")"
-          pure Nothing
-        Right res -> pure $ Just res
-
 pickRandomPerson :: State -> Effect String
 pickRandomPerson state =
   case state.allPeople of
@@ -557,175 +492,3 @@ pickRandomPerson state =
       let randPers = fromMaybe "Nobody" $ state.allPeople !! index
       if state.currentPerson == randPers then pickRandomPerson state
       else pure randPers
-
-setWinner :: String -> QuarterWinners -> QuarterWinners
-setWinner winner winners = case winners of
-  { q1: Nothing, q2: _, q3: _, q4: _, ot: _ } -> winners { q1 = Just winner }
-  { q1: Just _, q2: Nothing, q3: _, q4: _, ot: _ } -> winners { q2 = Just winner }
-  { q1: Just _, q2: Just _, q3: Nothing, q4: _, ot: _ } -> winners { q3 = Just winner }
-  { q1: Just _, q2: Just _, q3: Just _, q4: Nothing, ot: _ } -> winners { q4 = Just winner }
-  { q1: Just _, q2: Just _, q3: Just _, q4: Just _, ot: Nothing } -> winners { ot = Just winner }
-  _ -> winners
-
-checkQuarter :: Int -> QuarterWinners -> Boolean
-checkQuarter quarter winners = case quarter of
-  2 -> winners.q1 /= Nothing
-  3 -> winners.q2 /= Nothing
-  4 -> winners.q3 /= Nothing
-  5 -> winners.q4 /= Nothing
-  _ -> false
-
-data Response = Response
-  { clock :: String
-  , situation :: Situation
-  , quarter :: Int
-  , status :: String
-  , home :: Maybe Team
-  , away :: Maybe Team
-  , scoring :: Maybe Scoring
-  }
-derive instance Generic Response _
-
-instance Show Response where
-  show = genericShow
-
-instance DecodeJson Response where
-  decodeJson json = caseJsonObject
-    (Left $ TypeMismatch "object")
-    (\obj -> do
-      situation <- obj .: "situation"
-      clock <- obj .: "clock"
-      quarter <- obj .: "quarter"
-      status <- obj .: "status"
-      home <- obj .:? "home"
-      away <- obj .:? "away"
-      scoring <- obj .:? "scoring"
-      pure $ Response { situation, clock, quarter, status, home, away, scoring })
-    json
-
-newtype Team = Team
-  { name :: String
-  , alias :: String
-  }
-derive instance Generic Team _
-instance Show Team where
-  show = genericShow
-instance DecodeJson Team where
-  decodeJson json = caseJsonObject
-    (Left $ TypeMismatch "object")
-    (\obj -> do
-      name <- obj .: "name"
-      alias <- obj .: "alias"
-      pure $ Team { name, alias })
-    json
-
-newtype Scoring = Scoring
-  { home_points :: Int
-  , away_points :: Int
-  , periods :: Array Period
-  }
-derive instance Generic Scoring _
-instance Show Scoring where
-  show = genericShow
-instance DecodeJson Scoring where
-  decodeJson json = caseJsonObject
-    (Left $ TypeMismatch "object")
-    (\obj -> do
-      home_points <- obj .: "home_points"
-      away_points <- obj .: "away_points"
-      periodsMaybe <- obj .:? "periods"
-      periods <- case periodsMaybe of
-        Just periodsJson -> case decodeJson periodsJson of
-          Left _ -> pure []
-          Right arr -> pure arr
-        Nothing -> pure []
-      pure $ Scoring { home_points, away_points, periods })
-    json
-
-newtype Period = Period
-  { period_type :: String
-  , number :: Int
-  , home_points :: Int
-  , away_points :: Int
-  }
-derive instance Generic Period _
-instance Show Period where
-  show = genericShow
-instance DecodeJson Period where
-  decodeJson json = caseJsonObject
-    (Left $ TypeMismatch "object")
-    (\obj -> do
-      period_type <- obj .: "period_type"
-      number <- obj .: "number"
-      home_points <- obj .: "home_points"
-      away_points <- obj .: "away_points"
-      pure $ Period { period_type, number, home_points, away_points })
-    json
-
-type GameInfo =
-  { homeTeam :: String
-  , awayTeam :: String
-  , homeScore :: Int
-  , awayScore :: Int
-  , clock :: String
-  , quarterScores :: Array { quarter :: Int, home :: Int, away :: Int }
-  }
-
-data Situation = Situation
-  { situationClock :: String
-  , down :: Int
-  , yfd :: Int
-  , possession :: Possession
-  }
-derive instance Generic Situation _
-
-instance Show Situation where
-  show = genericShow
-
-instance DecodeJson Situation where
-  decodeJson json = caseJsonObject
-    (Left $ TypeMismatch "object")
-    (\obj -> do
-      situationClock <- obj .: "clock"
-      down <- obj .: "down"
-      yfd <- obj .: "yfd"
-      possession <- obj .: "possession"
-      pure $ Situation { situationClock, down, yfd, possession }
-    )
-    json
-
-getPossession :: Situation -> Possession
-getPossession (Situation { possession }) = possession
-
-newtype Possession = Possession
-  { id :: String
-  , name :: String
-  , market :: String
-  , alias :: String
-  , sr_id :: String
-  }
-
-instance Show Possession where
-  show = genericShow
-
-derive instance Generic Possession _
-instance DecodeJson Possession where
-  decodeJson json = caseJsonObject
-    (Left $ TypeMismatch "object")
-    (\obj -> do
-      id <- obj .: "id"
-      name <- obj .: "name"
-      market <- obj .: "market"
-      alias <- obj .: "alias"
-      sr_id <- obj .: "sr_id"
-      pure $ Possession { id, name, market, alias, sr_id }
-    )
-    json
-
-type QuarterWinners = 
-  { q1 :: Maybe String
-  , q2 :: Maybe String
-  , q3 :: Maybe String
-  , q4 :: Maybe String
-  , ot :: Maybe String
-  }
