@@ -3,7 +3,7 @@ module Test.Main where
 import Prelude
 
 import NFL.API as API
-import NFL.Types as NFL
+import NFL.Data as NFL
 import Data.Maybe (Maybe(..))
 import Effect (Effect)
 import Effect.Class.Console (log)

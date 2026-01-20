@@ -19,7 +19,7 @@ import Halogen.HTML.Events (onClick, onValueInput, onKeyDown) as HP
 import Halogen.HTML.Properties (style, value, placeholder) as HP
 import Web.UIEvent.KeyboardEvent (key)
 import Halogen.Subscription as HS
-import NFL.Types as NFL
+import NFL.Data as NFL
 import NFL.API as NFLAPI
 import Game.Winners as Winners
 

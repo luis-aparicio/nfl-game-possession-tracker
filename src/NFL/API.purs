@@ -13,9 +13,9 @@ import Data.Maybe (Maybe(..))
 import Effect.Aff (Aff)
 import Effect.Class (liftEffect)
 import Effect.Class.Console (log)
-import NFL.Types as Types
+import NFL.Data as Data
 
-getResponse :: Aff (Maybe { situation :: Types.Situation, clock :: String, status :: String, quarter :: Int, gameInfo :: Maybe Types.GameInfo })
+getResponse :: Aff (Maybe { situation :: Data.Situation, clock :: String, status :: String, quarter :: Int, gameInfo :: Maybe Data.GameInfo })
 getResponse = do
   config <- liftEffect Config.getConfig
   let gameId = Config.getGameId config
@@ -38,19 +38,19 @@ getResponse = do
             Left err -> do
               liftEffect $ log $ "ERROR: Decode failed: " <> show err <> " (" <> body <> ")"
               pure Nothing
-            Right (Types.Response { situation, clock, status, quarter, home, away, scoring }) -> do
+            Right (Data.Response { situation, clock, status, quarter, home, away, scoring }) -> do
               let gameInfo = buildGameInfo home away scoring clock
               pure $ Just { situation, clock, status, quarter, gameInfo }
 
-buildGameInfo :: Maybe Types.Team -> Maybe Types.Team -> Maybe Types.Scoring -> String -> Maybe Types.GameInfo
+buildGameInfo :: Maybe Data.Team -> Maybe Data.Team -> Maybe Data.Scoring -> String -> Maybe Data.GameInfo
 buildGameInfo home away scoring clock = do
-  (Types.Team { name: homeName }) <- home
-  (Types.Team { name: awayName }) <- away
-  (Types.Scoring { home_points, away_points, periods }) <- scoring
-  let quarterScores = map (\(Types.Period { number, home_points: h, away_points: a }) -> { quarter: number, home: h, away: a }) periods
+  (Data.Team { name: homeName }) <- home
+  (Data.Team { name: awayName }) <- away
+  (Data.Scoring { home_points, away_points, periods }) <- scoring
+  let quarterScores = map (\(Data.Period { number, home_points: h, away_points: a }) -> { quarter: number, home: h, away: a }) periods
   pure { homeTeam: homeName, awayTeam: awayName, homeScore: home_points, awayScore: away_points, clock, quarterScores }
 
-getResponse' :: String -> Aff (Maybe Types.Response)
+getResponse' :: String -> Aff (Maybe Data.Response)
 getResponse' body = do
   case jsonParser body of
     Left err -> do
@@ -63,13 +63,13 @@ getResponse' body = do
           pure Nothing
         Right res -> pure $ Just res
 
-getPossession :: Types.Situation -> Types.Possession
-getPossession (Types.Situation { possession }) = possession
+getPossession :: Data.Situation -> Data.Possession
+getPossession (Data.Situation { possession }) = possession
 
-getClock :: Maybe Types.GameInfo -> Maybe Types.Situation -> String
+getClock :: Maybe Data.GameInfo -> Maybe Data.Situation -> String
 getClock gameInfo situation = 
   case gameInfo of
     Just { clock } -> clock
     Nothing -> case situation of
-      Just (Types.Situation { situationClock }) -> situationClock
+      Just (Data.Situation { situationClock }) -> situationClock
       Nothing -> "00:00"

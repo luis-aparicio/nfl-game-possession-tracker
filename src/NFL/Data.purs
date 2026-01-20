@@ -1,4 +1,4 @@
-module NFL.Types where
+module NFL.Data where
 
 import Prelude
 
