@@ -5,7 +5,10 @@ module Test.TestData where
 testJSON1 :: String
 testJSON1 =
   """
-{ "situation": {
+{ "clock": "25:00",
+  "quarter": 1,
+  "status": "inprogress",
+  "situation": {
       "clock": "25:00",
       "down": 1,
       "yfd": 10,
@@ -31,8 +34,11 @@ testJSON1 =
 testJSON2 :: String
 testJSON2 =
   """
-{ "situation": {
-      "clock": "13:00",
+{ "clock": "15:00",
+  "quarter": 2,
+  "status": "inprogress",
+  "situation": {
+      "clock": "15:00",
       "down": 1,
       "yfd": 10,
       "possession": {
@@ -57,8 +63,11 @@ testJSON2 =
 testJSON3 :: String
 testJSON3 =
   """
-{ "situation": {
-      "clock": "00:00",
+{ "clock": "15:00",
+  "quarter": 3,
+  "status": "inprogress",
+  "situation": {
+      "clock": "15:00",
       "down": 1,
       "yfd": 10,
       "possession": {
@@ -80,11 +89,14 @@ testJSON3 =
 }
 """
 
--- Additional test JSON for 15:00 clock transition
+-- Additional test JSON for quarter 4
 testJSON4 :: String
 testJSON4 =
   """
-{ "situation": {
+{ "clock": "15:00",
+  "quarter": 4,
+  "status": "inprogress",
+  "situation": {
       "clock": "15:00",
       "down": 1,
       "yfd": 10,

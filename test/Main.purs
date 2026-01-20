@@ -15,109 +15,95 @@ import Test.TestData as TestData
 main :: Effect Unit
 main = runSpecAndExitProcess [ consoleReporter ] do
   describe "JSON Decoding Tests" do
-    it "should decode testJSON1 successfully" do
-      result <- Person.getSituation' TestData.testJSON1
+    it "should decode testJSON1 (Quarter 1) successfully" do
+      result <- Person.getResponse' TestData.testJSON1
       result `shouldSatisfy` case _ of
         Just _ -> true
         Nothing -> false
       case result of
-        Just (Person.Response { situation }) -> do
-          let clock = Person.getClock situation
-          clock `shouldEqual` "25:00"
+        Just (Person.Response { situation, quarter }) -> do
+          quarter `shouldEqual` 1
           let (Person.Possession { name }) = Person.getPossession situation
           name `shouldEqual` "Seahawks"
         Nothing -> log "Failed to decode testJSON1" *> pure unit
 
-    it "should decode testJSON2 successfully" do
-      result <- Person.getSituation' TestData.testJSON2
+    it "should decode testJSON2 (Quarter 2) successfully" do
+      result <- Person.getResponse' TestData.testJSON2
       result `shouldSatisfy` case _ of
         Just _ -> true
         Nothing -> false
       case result of
-        Just (Person.Response { situation }) -> do
-          let clock = Person.getClock situation
-          clock `shouldEqual` "13:00"
+        Just (Person.Response { situation, quarter }) -> do
+          quarter `shouldEqual` 2
           let (Person.Possession { name }) = Person.getPossession situation
           name `shouldEqual` "Chiefs"
         Nothing -> log "Failed to decode testJSON2" *> pure unit
 
-    it "should decode testJSON3 successfully" do
-      result <- Person.getSituation' TestData.testJSON3
+    it "should decode testJSON3 (Quarter 3) successfully" do
+      result <- Person.getResponse' TestData.testJSON3
       result `shouldSatisfy` case _ of
         Just _ -> true
         Nothing -> false
       case result of
-        Just (Person.Response { situation }) -> do
-          let clock = Person.getClock situation
-          clock `shouldEqual` "00:00"
+        Just (Person.Response { situation, quarter }) -> do
+          quarter `shouldEqual` 3
           let (Person.Possession { name }) = Person.getPossession situation
           name `shouldEqual` "Seahawks"
         Nothing -> log "Failed to decode testJSON3" *> pure unit
 
-    it "should decode testJSON4 (15:00) successfully" do
-      result <- Person.getSituation' TestData.testJSON4
+    it "should decode testJSON4 (Quarter 4) successfully" do
+      result <- Person.getResponse' TestData.testJSON4
       result `shouldSatisfy` case _ of
         Just _ -> true
         Nothing -> false
       case result of
-        Just (Person.Response { situation }) -> do
-          let clock = Person.getClock situation
-          clock `shouldEqual` "15:00"
+        Just (Person.Response { situation, quarter }) -> do
+          quarter `shouldEqual` 4
           let (Person.Possession { name }) = Person.getPossession situation
           name `shouldEqual` "Seahawks"
         Nothing -> log "Failed to decode testJSON4" *> pure unit
 
-  describe "Situation Transition Tests" do
-    it "should detect possession change from Seahawks to Chiefs" do
-      result1 <- Person.getSituation' TestData.testJSON1
-      result2 <- Person.getSituation' TestData.testJSON2
+  describe "Quarter Transition Tests" do
+    it "should detect quarter change from Quarter 1 to Quarter 2" do
+      result1 <- Person.getResponse' TestData.testJSON1
+      result2 <- Person.getResponse' TestData.testJSON2
       case result1, result2 of
-        Just (Person.Response { situation: sit1 }), Just (Person.Response { situation: sit2 }) -> do
-          let (Person.Possession { name: name1 }) = Person.getPossession sit1
-          let (Person.Possession { name: name2 }) = Person.getPossession sit2
-          name1 `shouldEqual` "Seahawks"
-          name2 `shouldEqual` "Chiefs"
-          (name1 /= name2) `shouldEqual` true
-        Nothing, _ -> log "Failed to decode testJSON1 for possession change test" *> pure unit
-        _, Nothing -> log "Failed to decode testJSON2 for possession change test" *> pure unit
+        Just (Person.Response { quarter: quarter1 }), Just (Person.Response { quarter: quarter2 }) -> do
+          quarter1 `shouldEqual` 1
+          quarter2 `shouldEqual` 2
+          (quarter1 /= quarter2) `shouldEqual` true
+        Nothing, _ -> log "Failed to decode testJSON1 for quarter change test" *> pure unit
+        _, Nothing -> log "Failed to decode testJSON2 for quarter change test" *> pure unit
 
-    it "should detect no possession change when both are Seahawks" do
-      result1 <- Person.getSituation' TestData.testJSON1
-      result3 <- Person.getSituation' TestData.testJSON3
-      case result1, result3 of
-        Just (Person.Response { situation: sit1 }), Just (Person.Response { situation: sit3 }) -> do
-          let (Person.Possession { name: name1 }) = Person.getPossession sit1
-          let (Person.Possession { name: name3 }) = Person.getPossession sit3
-          name1 `shouldEqual` "Seahawks"
-          name3 `shouldEqual` "Seahawks"
-          (name1 /= name3) `shouldEqual` false
-        Nothing, _ -> log "Failed to decode testJSON1 for no possession change test" *> pure unit
-        _, Nothing -> log "Failed to decode testJSON3 for no possession change test" *> pure unit
+    it "should detect quarter change from Quarter 2 to Quarter 3" do
+      result2 <- Person.getResponse' TestData.testJSON2
+      result3 <- Person.getResponse' TestData.testJSON3
+      case result2, result3 of
+        Just (Person.Response { quarter: quarter2 }), Just (Person.Response { quarter: quarter3 }) -> do
+          quarter2 `shouldEqual` 2
+          quarter3 `shouldEqual` 3
+          (quarter2 /= quarter3) `shouldEqual` true
+        Nothing, _ -> log "Failed to decode testJSON2 for quarter change test" *> pure unit
+        _, Nothing -> log "Failed to decode testJSON3 for quarter change test" *> pure unit
 
-    it "should detect clock at 00:00" do
-      result <- Person.getSituation' TestData.testJSON3
-      case result of
-        Just (Person.Response { situation }) -> do
-          let clock = Person.getClock situation
-          (clock == "00:00") `shouldEqual` true
-        Nothing -> log "Failed to decode testJSON3 for clock test" *> pure unit
+    it "should detect quarter change from Quarter 3 to Quarter 4" do
+      result3 <- Person.getResponse' TestData.testJSON3
+      result4 <- Person.getResponse' TestData.testJSON4
+      case result3, result4 of
+        Just (Person.Response { quarter: quarter3 }), Just (Person.Response { quarter: quarter4 }) -> do
+          quarter3 `shouldEqual` 3
+          quarter4 `shouldEqual` 4
+          (quarter3 /= quarter4) `shouldEqual` true
+        Nothing, _ -> log "Failed to decode testJSON3 for quarter change test" *> pure unit
+        _, Nothing -> log "Failed to decode testJSON4 for quarter change test" *> pure unit
 
-    it "should detect clock at 15:00" do
-      result <- Person.getSituation' TestData.testJSON4
-      case result of
-        Just (Person.Response { situation }) -> do
-          let clock = Person.getClock situation
-          (clock == "15:00") `shouldEqual` true
-        Nothing -> log "Failed to decode testJSON4 for clock test" *> pure unit
-
-    it "should detect clock NOT at 00:00 or 15:00" do
-      result1 <- Person.getSituation' TestData.testJSON1
-      result2 <- Person.getSituation' TestData.testJSON2
-      case result1, result2 of
-        Just (Person.Response { situation: sit1 }), Just (Person.Response { situation: sit2 }) -> do
-          let clock1 = Person.getClock sit1
-          let clock2 = Person.getClock sit2
-          (clock1 == "00:00" || clock1 == "15:00") `shouldEqual` false
-          (clock2 == "00:00" || clock2 == "15:00") `shouldEqual` false
-        Nothing, _ -> log "Failed to decode testJSON1 for clock test" *> pure unit
-        _, Nothing -> log "Failed to decode testJSON2 for clock test" *> pure unit
+    it "should detect no quarter change when both are Quarter 1" do
+      result1 <- Person.getResponse' TestData.testJSON1
+      result1Again <- Person.getResponse' TestData.testJSON1
+      case result1, result1Again of
+        Just (Person.Response { quarter: quarter1 }), Just (Person.Response { quarter: quarter1Again }) -> do
+          quarter1 `shouldEqual` 1
+          quarter1Again `shouldEqual` 1
+          (quarter1 /= quarter1Again) `shouldEqual` false
+        Nothing, _ -> log "Failed to decode testJSON1 for no quarter change test" *> pure unit
+        _, Nothing -> log "Failed to decode testJSON1 again for no quarter change test" *> pure unit

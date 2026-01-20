@@ -38,12 +38,14 @@ type Output = Int
 type State =
   { time :: Int
   , situation :: Maybe Situation
+  , quarter :: Int
+  , status :: String
   , currentPerson :: String
   , allPeople :: Array String
-  , winners :: Array String
+  , winners :: QuarterWinners
   , ballPossessionHistory :: Array String
   , renderSurrenderButton :: Boolean
-  , gameStarted :: Boolean
+  , showGamePage :: Boolean
   , newParticipantName :: String
   }
   
@@ -70,23 +72,25 @@ initialState :: forall input. input -> State
 initialState _ =
   { time: 0
   , situation: Nothing
+  , status: "scheduled"
+  , quarter: 1
   , currentPerson: "Nobody"
   , allPeople: []
-  , winners: []
+  , winners: { q1: Nothing, q2: Nothing, q3: Nothing, q4: Nothing, ot: Nothing }
   , ballPossessionHistory: []
   , renderSurrenderButton: true
-  , gameStarted: false
+  , showGamePage: false
   , newParticipantName: ""
   }
 
 render :: forall m. State -> H.ComponentHTML Action () m
 render state = 
-  if state.gameStarted then
+  if state.showGamePage then
     renderGame state
   else
     renderSetup state
   where
-  renderGame state' = HH.div_
+  renderGame state'@{ winners: { q1, q2, q3, q4, ot } } = HH.div_
     [ HH.div
         [ HP.style "margin: auto; width: 50%; border: 3px solid green; padding: 10px; text-align: center;"
         ]
@@ -107,13 +111,17 @@ render state =
         [ HH.ul [ HP.style "text-align: center" ] (cons (HH.div [ HP.style "font-size: 24px" ] [ HH.text "Waiting: " ]) (map renderItem (filter ((/=) state'.currentPerson) state'.allPeople))) ]
     , HH.div
         [ HP.style "margin: auto; width: 50%; border: 3px solid blue; padding: 10px;" ]
-        [ HH.ul [ HP.style "text-align: center" ] (cons (HH.div [ HP.style "font-size: 24px" ] [ HH.text "Winners: " ]) (map renderItem state'.winners)) ]
+        [ HH.ul [ HP.style "text-align: center" ] (cons (HH.div [ HP.style "font-size: 24px" ] [ HH.text "Winners: " ]) (map renderItem' [ q1, q2, q3, q4, ot ])) ]
     , HH.div
         [ HP.style "margin: auto; width: 50%; padding: 10px;"
         ]
         [ HH.h1
             [ HP.style "font-size: 52px; text-align: center" ]
-            [ HH.text $ "Next Update: " <> show (45 - state'.time) ]
+            [ HH.text $ 
+                if state.status == "scheduled" || state.status == "closed"
+                then "Not Running" 
+                else "Next Update: " <> show (45 - state'.time) 
+            ]
         ]
     ]
   
@@ -184,26 +192,28 @@ render state =
         HH.text ""
     ]
   
-  renderItem person = HH.div [ HP.style "font-size: 24px" ] [ HH.text person ]
-  
+  renderItem item = HH.div [ HP.style "font-size: 24px" ] [ HH.text item ]
+  renderItem' item' = case item' of
+    Just item -> HH.div [ HP.style "font-size: 24px" ] [ HH.text item ]
+    Nothing -> HH.div_ []
 
 handleAction :: forall output m. MonadAff m => Action -> H.HalogenM State Action () output m Unit
 handleAction = case _ of
   Initialize -> do
     currentState <- H.get
-    when currentState.gameStarted do
+    when currentState.showGamePage do
       _ <- H.subscribe =<< timer Tick
-      maybeRes <- H.liftAff getSituation
+      maybeRes <- H.liftAff getResponse
       case maybeRes of
-        Just (Response { situation }) -> do
+        Just { situation, status } -> do
           randPerson <- liftEffect $ pickRandomPerson currentState
           H.modify_ \state -> state
             { situation = Just situation
             , currentPerson = randPerson
             , ballPossessionHistory = cons randPerson state.ballPossessionHistory
+            , status = status
             }
         Nothing -> pure unit
-    pure unit
 
   UpdateParticipantName name -> do
     H.modify_ \state -> state { newParticipantName = name }
@@ -225,61 +235,60 @@ handleAction = case _ of
   StartGame -> do
     currentState <- H.get
     when (length currentState.allPeople >= 2) do
-      H.modify_ \state -> state { gameStarted = true }
-      -- Trigger Initialize to start the game
+      H.modify_ \state -> state { showGamePage = true }
       handleAction Initialize
 
   Tick -> do
-    currentState <- H.get
-    unless currentState.gameStarted $ pure unit
-    when (length currentState.winners == 5) $
-      H.modify_ \state -> state
-        { time = 0
-        , currentPerson = "Game Over"
-        }
-
-    if currentState.time == 45 then do
-      liftEffect $ log $ show currentState
-      maybeRes <- H.liftAff getSituation
+    oldState <- H.get
+    if oldState.status == "scheduled" || oldState.status == "closed"
+    then pure unit
+    else if oldState.time == 45 then do
+      liftEffect $ log $ show oldState
+      maybeRes <- H.liftAff getResponse
       case maybeRes of
-        Just (Response { situation }) -> do
+        Just { situation, status, quarter } -> do
           let
-            oldName = maybe "" ((\(Possession { name }) -> name) <<< getPossession) currentState.situation
+            oldName = maybe "" ((\(Possession { name }) -> name) <<< getPossession) oldState.situation
             (Possession { name }) = getPossession situation
-          randPerson <- liftEffect $ pickRandomPerson currentState
+          randPerson <- liftEffect $ pickRandomPerson oldState
           if oldName /= name then
             H.modify_ _
               { time = 0
               , situation = Just situation
+              , quarter = quarter
+              , status = status 
               , currentPerson = randPerson
-              , ballPossessionHistory = cons randPerson currentState.ballPossessionHistory
+              , ballPossessionHistory = cons randPerson oldState.ballPossessionHistory
               , renderSurrenderButton = true
               }
           else
             H.modify_ _
               { time = 0
               , situation = Just situation
+              , quarter = quarter
+              , status = status
               }
-          cs <- H.get
-          when (map getClock cs.situation == Just "00:00" || map getClock cs.situation == Just "15:00") do
+          when ((oldState.quarter /= quarter) && checkQuarter quarter oldState.winners) do
             H.modify_ \state -> state
               { currentPerson = randPerson
               , allPeople = filter ((/=) state.currentPerson) state.allPeople
-              , winners = cons
-                  ( "Q"
-                      <> show ((length state.winners) + 1)
-                      <> " "
-                      <> state.currentPerson
-                  )
-                  state.winners
+              , winners = setWinner state.currentPerson state.winners
               , ballPossessionHistory = cons randPerson state.ballPossessionHistory
               , renderSurrenderButton = true
+              }
+          when (status == "closed") do
+            H.modify_ \state -> state
+              { currentPerson = "Game Over"
+              , allPeople = filter ((/=) state.currentPerson) state.allPeople
+              , winners = setWinner state.currentPerson state.winners
+              , ballPossessionHistory = cons randPerson state.ballPossessionHistory
+              , renderSurrenderButton = false
               }
         Nothing -> do
           liftEffect $ log $ "No API Response"
           H.modify_ _ { time = -60 }
           pure unit
-    else H.modify_ \state -> state { time = state.time + 1 }
+    else H.modify_ \state -> state { time = state.time + 1 }  
 
   SurrenderPossession -> do
     currentState <- H.get
@@ -298,11 +307,11 @@ timer val = do
     H.liftEffect $ HS.notify listener val
   pure emitter
 
-getSituation :: Aff (Maybe Response)
-getSituation = do
+getResponse :: Aff (Maybe { situation :: Situation, clock :: String, status :: String, quarter :: Int })
+getResponse = do
   config <- liftEffect Config.getConfig
   let gameId = Config.getGameId config
-  let apiUrl = "/api/nfl/official/trial/v7/en/games/" <> gameId <> "/boxscore.json?api_key=" <> config.apiKey
+      apiUrl = "/api/nfl/official/trial/v7/en/games/" <> gameId <> "/boxscore.json?api_key=" <> config.apiKey
   result <- Ajax.get
     AffjaxWeb.driver
     ResponseFormat.string
@@ -321,10 +330,10 @@ getSituation = do
             Left err -> do
               liftEffect $ log $ "ERROR: Decode failed: " <> show err <> " (" <> body <> ")"
               pure Nothing
-            Right res -> pure $ Just res
+            Right (Response { situation, clock, status, quarter }) -> pure $ Just { situation, clock, status, quarter }
 
-getSituation' :: String -> Aff (Maybe Response)
-getSituation' body = do
+getResponse' :: String -> Aff (Maybe Response)
+getResponse' body = do
   case jsonParser body of
     Left err -> do
       liftEffect $ log $ "ERROR: JSON parse failed: " <> err <> " (" <> body <> ")"
@@ -347,8 +356,28 @@ pickRandomPerson state =
       if state.currentPerson == randPers then pickRandomPerson state
       else pure randPers
 
+setWinner :: String -> QuarterWinners -> QuarterWinners
+setWinner winner winners = case winners of
+  { q1: Nothing, q2: _, q3: _, q4: _, ot: _ } -> winners { q1 = Just winner }
+  { q1: Just _, q2: Nothing, q3: _, q4: _, ot: _ } -> winners { q2 = Just winner }
+  { q1: Just _, q2: Just _, q3: Nothing, q4: _, ot: _ } -> winners { q3 = Just winner }
+  { q1: Just _, q2: Just _, q3: Just _, q4: Nothing, ot: _ } -> winners { q4 = Just winner }
+  { q1: Just _, q2: Just _, q3: Just _, q4: Just _, ot: Nothing } -> winners { ot = Just winner }
+  _ -> winners
+
+checkQuarter :: Int -> QuarterWinners -> Boolean
+checkQuarter quarter winners = case quarter of
+  2 -> winners.q1 /= Nothing
+  3 -> winners.q2 /= Nothing
+  4 -> winners.q3 /= Nothing
+  5 -> winners.q4 /= Nothing
+  _ -> false
+
 data Response = Response
-  { situation :: Situation
+  { clock :: String
+  , situation :: Situation
+  , quarter :: Int
+  , status :: String
   }
 derive instance Generic Response _
 
@@ -360,11 +389,14 @@ instance DecodeJson Response where
     (Left $ TypeMismatch "object")
     (\obj -> do
       situation <- obj .: "situation"
-      pure $ Response { situation })
+      clock <- obj .: "clock"
+      quarter <- obj .: "quarter"
+      status <- obj .: "status"
+      pure $ Response { situation, clock, quarter, status })
     json
 
 data Situation = Situation
-  { clock :: String
+  { situationClock :: String
   , down :: Int
   , yfd :: Int
   , possession :: Possession
@@ -378,18 +410,16 @@ instance DecodeJson Situation where
   decodeJson json = caseJsonObject
     (Left $ TypeMismatch "object")
     (\obj -> do
-      clock <- obj .: "clock"
+      situationClock <- obj .: "clock"
       down <- obj .: "down"
       yfd <- obj .: "yfd"
       possession <- obj .: "possession"
-      pure $ Situation { clock, down, yfd, possession })
+      pure $ Situation { situationClock, down, yfd, possession }
+    )
     json
 
 getPossession :: Situation -> Possession
 getPossession (Situation { possession }) = possession
-
-getClock :: Situation -> String
-getClock (Situation { clock }) = clock
 
 newtype Possession = Possession
   { id :: String
@@ -412,28 +442,14 @@ instance DecodeJson Possession where
       market <- obj .: "market"
       alias <- obj .: "alias"
       sr_id <- obj .: "sr_id"
-      pure $ Possession { id, name, market, alias, sr_id })
+      pure $ Possession { id, name, market, alias, sr_id }
+    )
     json
 
--- {
---   "situation": {
---       "clock": "00:00",
---       "down": 1,
---       "yfd": 10,
---       "possession": {
---           "id": "3d08af9e-c767-4f88-a7dc-b920c6d2b4a8",
---           "name": "Seahawks",
---           "market": "Seattle",
---           "alias": "SEA",
---           "sr_id": "sr:competitor:4430"
---       },
---       "location": {
---           "id": "3d08af9e-c767-4f88-a7dc-b920c6d2b4a8",
---           "name": "Seahawks",
---           "market": "Seattle",
---           "alias": "SEA",
---           "sr_id": "sr:competitor:4430",
---           "yardline": 40
---       }
---   }
--- }
+type QuarterWinners = 
+  { q1 :: Maybe String
+  , q2 :: Maybe String
+  , q3 :: Maybe String
+  , q4 :: Maybe String
+  , ot :: Maybe String
+  }
