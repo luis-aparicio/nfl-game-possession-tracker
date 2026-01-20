@@ -19,7 +19,7 @@ import Effect.Aff.Class (class MonadAff)
 import Effect.Class (liftEffect)
 import Effect.Class.Console (log)
 import Effect.Random (randomInt)
-import Data.Argonaut.Decode (class DecodeJson, decodeJson, (.:))
+import Data.Argonaut.Decode (class DecodeJson, decodeJson, (.:), (.:?))
 import Data.Argonaut.Decode.Error (JsonDecodeError(..))
 import Data.Argonaut.Parser (jsonParser)
 import Data.Argonaut.Core (caseJsonObject)
@@ -47,6 +47,7 @@ type State =
   , renderSurrenderButton :: Boolean
   , showGamePage :: Boolean
   , newParticipantName :: String
+  , gameInfo :: Maybe GameInfo
   }
   
 data Action 
@@ -81,6 +82,7 @@ initialState _ =
   , renderSurrenderButton: true
   , showGamePage: false
   , newParticipantName: ""
+  , gameInfo: Nothing
   }
 
 render :: forall m. State -> H.ComponentHTML Action () m
@@ -90,112 +92,303 @@ render state =
   else
     renderSetup state
   where
-  renderGame state'@{ winners: { q1, q2, q3, q4, ot } } = HH.div_
-    [ HH.div
-        [ HP.style "margin: auto; width: 50%; border: 3px solid green; padding: 10px; text-align: center;"
-        ]
-        [ HH.h1
-            [ HP.style "font-size: 128px; text-align: center" ]
-            [ HH.text state'.currentPerson ]
-        , if state'.renderSurrenderButton then
-            HH.button
-              [ HP.style "font-size: 24px; margin: 0 auto; display: block;"
-              , HP.onClick \_ -> SurrenderPossession
+  renderGame state'@{ winners: { q1, q2, q3, q4, ot }, gameInfo, situation } = 
+    HH.div
+      [ HP.style $ baseContainerStyle <> "background: #E8E8E8; min-height: 100vh; padding: 20px;"
+      ]
+      [ renderGameHeader gameInfo state'.quarter state'.status (getClockFromState gameInfo situation)
+      , HH.div
+          [ HP.style "max-width: 1400px; margin: 0 auto; display: grid; grid-template-columns: 1fr 1fr; gap: 15px; margin-top: 15px; align-items: stretch;"
+          ]
+          [ renderCurrentPerson state'.currentPerson state'.renderSurrenderButton
+          , renderWaitingList state'.currentPerson state'.allPeople
+          ]
+      , renderWinnersFooter { q1, q2, q3, q4, ot }
+      , renderUpdateTimer state'.status state'.time
+      ]
+  
+  renderSetup state' = 
+    HH.div
+      [ HP.style $ baseContainerStyle <> "background: #E8E8E8; min-height: 100vh; padding: 40px 20px; display: flex; align-items: center; justify-content: center;"
+      ]
+      [ HH.div
+          [ HP.style "max-width: 700px; width: 100%; background: rgba(255, 255, 255, 0.95); border-radius: 30px; padding: 50px; box-shadow: 0 8px 32px rgba(0, 0, 0, 0.15); border: 2px solid rgba(192, 192, 192, 0.6);"
+          ]
+          [ HH.h1
+              [ HP.style "font-size: 56px; margin: 0 0 40px 0; text-align: center; font-weight: bold; text-shadow: 2px 2px 4px rgba(0,0,0,0.2); color: #8B00FF;"
               ]
-              [ HH.text "Surrender Possession" ]
-          else
-            HH.text ""
-        ]
-    , HH.div
-        [ HP.style "margin: auto; width: 50%; border: 3px solid red; padding: 10px;" ]
-        [ HH.ul [ HP.style "text-align: center" ] (cons (HH.div [ HP.style "font-size: 24px" ] [ HH.text "Waiting: " ]) (map renderItem (filter ((/=) state'.currentPerson) state'.allPeople))) ]
-    , HH.div
-        [ HP.style "margin: auto; width: 50%; border: 3px solid blue; padding: 10px;" ]
-        [ HH.ul [ HP.style "text-align: center" ] (cons (HH.div [ HP.style "font-size: 24px" ] [ HH.text "Winners: " ]) (map renderItem' [ q1, q2, q3, q4, ot ])) ]
-    , HH.div
-        [ HP.style "margin: auto; width: 50%; padding: 10px;"
-        ]
-        [ HH.h1
-            [ HP.style "font-size: 52px; text-align: center" ]
-            [ HH.text $ 
-                if state.status == "scheduled" || state.status == "closed"
-                then "Not Running" 
-                else "Next Update: " <> show (45 - state'.time) 
-            ]
-        ]
-    ]
-  
-  renderSetup state' = HH.div
-    [ HP.style "margin: auto; width: 80%; max-width: 600px; padding: 20px; text-align: center;"
-    ]
-    [ HH.h1
-        [ HP.style "font-size: 48px; margin-bottom: 30px;" ]
-        [ HH.text "Game Setup" ]
-    , HH.div
-        [ HP.style "margin-bottom: 20px;" ]
-        [ HH.input
-            [ HP.placeholder "Enter participant name"
-            , HP.value state'.newParticipantName
-            , HP.onValueInput UpdateParticipantName
-            , HP.onKeyDown \ev -> if key ev == "Enter" then AddParticipant else Initialize
-            , HP.style "font-size: 20px; padding: 10px; width: 100%; max-width: 400px;"
-            ]
-        , HH.button
-            [ HP.style "font-size: 20px; padding: 10px 20px; margin-left: 10px;"
-            , HP.onClick \_ -> AddParticipant
-            ]
-            [ HH.text "Add" ]
-        ]
-    , HH.div
-        [ HP.style "margin: 20px 0; min-height: 200px; border: 2px solid #ccc; padding: 20px; border-radius: 8px;"
-        ]
-        (if length state'.allPeople == 0 then
-          [ HH.p
-              [ HP.style "font-size: 18px; color: #666;" ]
-              [ HH.text "No participants added yet. Add names above." ]
-          ]
-        else
-          [ HH.h2
-              [ HP.style "font-size: 24px; margin-bottom: 15px;" ]
-              [ HH.text $ "Participants (" <> show (length state'.allPeople) <> ")" ]
-          , HH.ul
-              [ HP.style "list-style: none; padding: 0; text-align: left; max-width: 400px; margin: 0 auto;" ]
-              (mapWithIndex (\idx name -> 
-                HH.li
-                  [ HP.style "font-size: 20px; padding: 8px; margin: 5px 0; background: #f0f0f0; border-radius: 4px; display: flex; justify-content: space-between; align-items: center;"
+              [ HH.text "🏈 Game Setup" ]
+          , HH.div
+              [ HP.style "margin-bottom: 30px; display: flex; gap: 10px;"
+              ]
+              [ HH.input
+                  [ HP.placeholder "Enter participant name"
+                  , HP.value state'.newParticipantName
+                  , HP.onValueInput UpdateParticipantName
+                  , HP.onKeyDown \ev -> if key ev == "Enter" then AddParticipant else Initialize
+                  , HP.style "flex: 1; font-size: 20px; padding: 15px 20px; border: 2px solid rgba(192, 192, 192, 0.6); border-radius: 15px; background: rgba(255,255,255,0.9); color: #1a1a1a; font-weight: bold; ::placeholder { color: rgba(0,0,0,0.5); }"
                   ]
-                  [ HH.span [] [ HH.text name ]
-                  , HH.button
-                      [ HP.style "font-size: 16px; padding: 5px 10px; background: #ff4444; color: white; border: none; border-radius: 4px; cursor: pointer;"
-                      , HP.onClick \_ -> RemoveParticipant idx
+              , HH.button
+                  [ HP.style "font-size: 20px; padding: 15px 30px; background: #32CD32; color: white; border: 2px solid rgba(255, 255, 255, 0.3); border-radius: 15px; cursor: pointer; font-weight: bold; box-shadow: 0 4px 15px rgba(0,0,0,0.3); transition: transform 0.2s;"
+                  , HP.onClick \_ -> AddParticipant
+                  ]
+                  [ HH.text "Add" ]
+              ]
+          , HH.div
+              [ HP.style "margin: 30px 0; min-height: 200px; background: rgba(255, 255, 255, 0.7); border: 2px solid rgba(74, 144, 226, 0.5); padding: 30px; border-radius: 20px;"
+              ]
+              (if length state'.allPeople == 0 then
+                [ HH.p
+                    [ HP.style "font-size: 20px; text-align: center; opacity: 0.8; margin: 0; color: #1a1a1a;"
+                    ]
+                    [ HH.text "No participants added yet. Add names above." ]
+                ]
+              else
+                [ HH.h2
+                    [ HP.style "font-size: 28px; margin: 0 0 20px 0; text-align: center; font-weight: bold; text-shadow: 1px 1px 2px rgba(0,0,0,0.2); color: #1a1a1a;"
+                    ]
+                    [ HH.text $ "Participants (" <> show (length state'.allPeople) <> ")" ]
+                , HH.div
+                    [ HP.style "display: flex; flex-direction: column; gap: 12px;"
+                    ]
+                    (mapWithIndex (\idx name -> 
+                      HH.div
+                        [ HP.style "background: rgba(255, 255, 255, 0.8); border-radius: 12px; padding: 15px 20px; display: flex; justify-content: space-between; align-items: center; border: 1px solid rgba(192, 192, 192, 0.5);"
+                        ]
+                        [ HH.span 
+                            [ HP.style "font-size: 22px; font-weight: bold;"
+                            ]
+                            [ HH.text name ]
+                        , HH.button
+                            [ HP.style "font-size: 16px; padding: 8px 16px; background: #FF1493; color: white; border: 1px solid rgba(255, 255, 255, 0.3); border-radius: 8px; cursor: pointer; font-weight: bold; box-shadow: 0 2px 8px rgba(0,0,0,0.4);"
+                            , HP.onClick \_ -> RemoveParticipant idx
+                            ]
+                            [ HH.text "Remove" ]
+                        ]
+                    ) state'.allPeople)
+                ])
+          , if length state'.allPeople >= 2 then
+              HH.button
+                [ HP.style "font-size: 28px; padding: 20px 50px; margin-top: 30px; width: 100%; background: #FFD700; color: #1a1a1a; border: 3px solid rgba(255, 255, 255, 0.5); border-radius: 20px; cursor: pointer; font-weight: bold; box-shadow: 0 6px 20px rgba(0,0,0,0.4); text-transform: uppercase; letter-spacing: 2px; transition: transform 0.2s;"
+                , HP.onClick \_ -> StartGame
+                ]
+                [ HH.text "🚀 Start Game" ]
+            else
+              HH.div_
+                [ HH.button
+                    [ HP.style "font-size: 28px; padding: 20px 50px; margin-top: 30px; width: 100%; background: rgba(255,255,255,0.2); color: rgba(255,255,255,0.5); border: 2px solid rgba(255,255,255,0.3); border-radius: 20px; cursor: not-allowed; font-weight: bold;"
+                    ]
+                    [ HH.text "Start Game (Need 2+ participants)" ]
+                , HH.p
+                    [ HP.style "font-size: 18px; color: #1a1a1a; margin-top: 15px; text-align: center; font-weight: bold;"
+                    ]
+                    [ HH.text "Add at least 2 participants to start the game" ]
+                ]
+          ]
+      ]
+  
+  baseContainerStyle = "font-family: 'Arial', sans-serif; color: #1a1a1a; "
+  
+  getClockFromState :: Maybe GameInfo -> Maybe Situation -> String
+  getClockFromState gameInfo situation = 
+    case gameInfo of
+      Just { clock } -> clock
+      Nothing -> case situation of
+        Just (Situation { situationClock }) -> situationClock
+        Nothing -> "00:00"
+  
+  renderGameHeader gameInfo quarter status clock = 
+    HH.div
+      [ HP.style "background: rgba(255, 255, 255, 0.9); border-radius: 20px; padding: 20px; margin-bottom: 15px; box-shadow: 0 8px 32px rgba(0, 0, 0, 0.15); border: 2px solid rgba(192, 192, 192, 0.5);"
+      ]
+      [ case gameInfo of
+          Just { homeTeam, awayTeam, homeScore, awayScore, quarterScores } ->
+            HH.div_
+              [ HH.div
+                  [ HP.style "display: flex; justify-content: space-between; align-items: center; margin-bottom: 15px; flex-wrap: wrap;"
+                  ]
+                  [ HH.div
+                      [ HP.style "flex: 1; text-align: center; min-width: 180px;"
                       ]
-                      [ HH.text "Remove" ]
+                      [ HH.h2
+                          [ HP.style "font-size: 28px; font-weight: bold; margin: 0; text-shadow: 1px 1px 2px rgba(0,0,0,0.2); color: #1a1a1a;"
+                          ]
+                          [ HH.text awayTeam ]
+                      , HH.div
+                          [ HP.style "font-size: 56px; font-weight: bold; margin: 8px 0; text-shadow: 2px 2px 4px rgba(0,0,0,0.2); color: #8B00FF;"
+                          ]
+                          [ HH.text $ show awayScore ]
+                      ]
+                  , HH.div
+                      [ HP.style "padding: 0 30px; text-align: center;"
+                      ]
+                      [ HH.div
+                          [ HP.style "font-size: 20px; font-weight: bold; margin-bottom: 6px; color: #FFD700;"
+                          ]
+                          [ HH.text $ "Q" <> show quarter ]
+                      , HH.div
+                          [ HP.style "font-size: 26px; font-weight: bold; color: #1a1a1a;"
+                          ]
+                          [ HH.text clock ]
+                      , HH.div
+                          [ HP.style "font-size: 14px; margin-top: 4px; opacity: 0.9; color: #FF1493; font-weight: bold;"
+                          ]
+                          [ HH.text $ if status == "inprogress" then "LIVE" else status ]
+                      ]
+                  , HH.div
+                      [ HP.style "flex: 1; text-align: center; min-width: 180px;"
+                      ]
+                      [ HH.h2
+                          [ HP.style "font-size: 28px; font-weight: bold; margin: 0; text-shadow: 1px 1px 2px rgba(0,0,0,0.2); color: #1a1a1a;"
+                          ]
+                          [ HH.text homeTeam ]
+                      , HH.div
+                          [ HP.style "font-size: 56px; font-weight: bold; margin: 8px 0; text-shadow: 2px 2px 4px rgba(0,0,0,0.2); color: #8B00FF;"
+                          ]
+                          [ HH.text $ show homeScore ]
+                      ]
                   ]
-              ) state'.allPeople)
-          ])
-    , if length state'.allPeople >= 2 then
-        HH.button
-          [ HP.style "font-size: 24px; padding: 15px 40px; margin-top: 20px; background: #4CAF50; color: white; border: none; border-radius: 8px; cursor: pointer;"
-          , HP.onClick \_ -> StartGame
-          ]
-          [ HH.text "Start Game" ]
-      else
-        HH.button
-          [ HP.style "font-size: 24px; padding: 15px 40px; margin-top: 20px; background: #cccccc; color: #666; border: none; border-radius: 8px; cursor: not-allowed;"
-          ]
-          [ HH.text "Start Game (Need 2+ participants)" ]
-    , if length state'.allPeople < 2 then
-        HH.p
-          [ HP.style "font-size: 16px; color: #ff4444; margin-top: 10px;" ]
-          [ HH.text "Add at least 2 participants to start the game" ]
-      else
-        HH.text ""
-    ]
+              , HH.div
+                  [ HP.style "display: flex; justify-content: center; gap: 20px; margin-top: 15px; padding-top: 15px; border-top: 2px solid rgba(192, 192, 192, 0.6); flex-wrap: wrap;"
+                  ]
+                  (map renderQuarterScore quarterScores)
+              ]
+          Nothing ->
+            HH.div
+              [ HP.style "text-align: center;"
+              ]
+              [ HH.h2
+                  [ HP.style "font-size: 32px; margin: 0; color: #1a1a1a;"
+                  ]
+                  [ HH.text $ "Quarter " <> show quarter ]
+              , HH.div
+                  [ HP.style "font-size: 24px; margin-top: 10px; color: #1a1a1a;"
+                  ]
+                  [ HH.text clock ]
+              ]
+      ]
   
-  renderItem item = HH.div [ HP.style "font-size: 24px" ] [ HH.text item ]
-  renderItem' item' = case item' of
-    Just item -> HH.div [ HP.style "font-size: 24px" ] [ HH.text item ]
-    Nothing -> HH.div_ []
+  renderQuarterScore { quarter, home, away } =
+    HH.div
+      [ HP.style "text-align: center;"
+      ]
+      [ HH.div
+          [ HP.style "font-size: 14px; opacity: 0.8; margin-bottom: 5px; color: #1a1a1a;"
+          ]
+          [ HH.text $ "Q" <> show quarter ]
+      , HH.div
+          [ HP.style "font-size: 20px; font-weight: bold; color: #1a1a1a;"
+          ]
+          [ HH.text $ show away <> " - " <> show home ]
+      ]
+  
+  renderCurrentPerson currentPerson renderSurrenderButton =
+    HH.div
+      [ HP.style "background: rgba(255, 255, 255, 0.95); border-radius: 20px; padding: 30px 25px; text-align: center; box-shadow: 0 8px 32px rgba(0, 0, 0, 0.15); border: 3px solid #FFD700; display: flex; flex-direction: column; justify-content: space-between;"
+      ]
+      [ HH.div
+          [ HP.style "flex: 1; display: flex; flex-direction: column; justify-content: center;"
+          ]
+          [ HH.div
+              [ HP.style "font-size: 20px; font-weight: bold; margin-bottom: 15px; opacity: 0.95; text-transform: uppercase; letter-spacing: 2px; text-shadow: 1px 1px 2px rgba(0,0,0,0.2); color: #8B00FF;"
+              ]
+              [ HH.text "Current Possession" ]
+          , HH.h1
+              [ HP.style "font-size: 110px; font-weight: bold; margin: 15px 0; text-shadow: 4px 4px 8px rgba(0,0,0,0.5), 0 0 20px rgba(255, 215, 0, 0.5); color: #FFD700; word-break: break-word; line-height: 1.1;"
+              ]
+              [ HH.text currentPerson ]
+          ]
+      , if renderSurrenderButton then
+          HH.button
+            [ HP.style "font-size: 18px; padding: 15px 30px; margin-top: 20px; background: #FF1493; color: white; border: 2px solid rgba(255, 255, 255, 0.4); border-radius: 50px; cursor: pointer; font-weight: bold; box-shadow: 0 4px 15px rgba(0,0,0,0.4); transition: transform 0.2s; text-transform: uppercase; letter-spacing: 1px;"
+            , HP.onClick \_ -> SurrenderPossession
+            ]
+            [ HH.text "🏈 Surrender Possession" ]
+        else
+          HH.text ""
+      ]
+  
+  renderWinnersFooter { q1, q2, q3, q4, ot } =
+    HH.div
+      [ HP.style "max-width: 1400px; margin: 15px auto 0; background: rgba(255, 255, 255, 0.9); border-radius: 15px; padding: 12px 20px; box-shadow: 0 4px 16px rgba(0, 0, 0, 0.1); border: 1px solid rgba(192, 192, 192, 0.5);"
+      ]
+      [ HH.div
+          [ HP.style "display: flex; align-items: center; justify-content: center; gap: 20px; flex-wrap: wrap;"
+          ]
+          [ HH.span
+              [ HP.style "font-size: 18px; font-weight: bold; color: #8B00FF; margin-right: 10px;"
+              ]
+              [ HH.text "🏆 Quarter Winners:" ]
+          , renderWinnerCard "Q1" q1
+          , renderWinnerCard "Q2" q2
+          , renderWinnerCard "Q3" q3
+          , renderWinnerCard "Q4" q4
+          , renderWinnerCard "OT" ot
+          ]
+      ]
+  
+  renderWaitingList currentPerson allPeople =
+    HH.div
+      [ HP.style "background: rgba(255, 255, 255, 0.9); border-radius: 20px; padding: 20px; box-shadow: 0 8px 32px rgba(0, 0, 0, 0.15); border: 2px solid rgba(192, 192, 192, 0.6); display: flex; flex-direction: column; max-height: calc(100vh - 200px);"
+      ]
+      [ HH.h2
+          [ HP.style "font-size: 24px; font-weight: bold; margin: 0 0 12px 0; text-align: center; text-shadow: 1px 1px 2px rgba(0,0,0,0.2); color: #4A90E2;"
+          ]
+          [ HH.text "⏳ Waiting" ]
+      , HH.div
+          [ HP.style "flex: 1; overflow-y: auto; min-height: 0; display: flex; flex-direction: column; gap: 8px;"
+          ]
+          (if length (filter ((/=) currentPerson) allPeople) == 0 then
+            [ HH.div
+                [ HP.style "text-align: center; padding: 15px; opacity: 0.6; font-size: 16px; color: #1a1a1a;"
+                ]
+                [ HH.text "Everyone has had a turn!" ]
+            ]
+          else
+            map renderWaitingItem (filter ((/=) currentPerson) allPeople))
+      ]
+  
+  renderWinnerCard label winner =
+    HH.div
+      [ HP.style "background: rgba(255, 255, 255, 0.8); border-radius: 8px; padding: 8px 12px; text-align: center; border: 1px solid rgba(192, 192, 192, 0.5); display: inline-flex; flex-direction: column; align-items: center; min-width: 80px;"
+      ]
+      [ HH.div
+          [ HP.style "font-size: 11px; opacity: 0.8; margin-bottom: 4px; font-weight: bold; color: #1a1a1a;"
+          ]
+          [ HH.text label ]
+      , case winner of
+          Just name ->
+            HH.div
+              [ HP.style "font-size: 14px; font-weight: bold; color: #FFD700; text-shadow: 1px 1px 2px rgba(0,0,0,0.2); line-height: 1.2;"
+              ]
+              [ HH.text name ]
+          Nothing ->
+            HH.div
+              [ HP.style "font-size: 12px; opacity: 0.5; color: #1a1a1a;"
+              ]
+              [ HH.text "—" ]
+      ]
+  
+  
+  renderWaitingItem item =
+    HH.div
+      [ HP.style "background: rgba(255, 255, 255, 0.8); border-radius: 8px; padding: 12px; font-size: 18px; font-weight: bold; text-align: center; border: 1px solid rgba(192, 192, 192, 0.5); color: #1a1a1a;"
+      ]
+      [ HH.text item ]
+  
+  renderUpdateTimer status time =
+    HH.div
+      [ HP.style "max-width: 1400px; margin: 15px auto 0; background: rgba(255, 255, 255, 0.9); border-radius: 15px; padding: 12px 20px; text-align: center; border: 1px solid rgba(192, 192, 192, 0.5); box-shadow: 0 4px 16px rgba(0, 0, 0, 0.1); color: #1a1a1a;"
+      ]
+      [ HH.div
+          [ HP.style "font-size: 24px; font-weight: bold;"
+          ]
+          [ HH.text $ 
+              if status == "scheduled" || status == "closed"
+              then "⏸️ Game " <> (if status == "closed" then "Ended" else "Not Running")
+              else "⏱️ Next Update: " <> show (45 - time) <> "s"
+          ]
+      ]
 
 handleAction :: forall output m. MonadAff m => Action -> H.HalogenM State Action () output m Unit
 handleAction = case _ of
@@ -205,13 +398,14 @@ handleAction = case _ of
       _ <- H.subscribe =<< timer Tick
       maybeRes <- H.liftAff getResponse
       case maybeRes of
-        Just { situation, status } -> do
+        Just { situation, status, gameInfo } -> do
           randPerson <- liftEffect $ pickRandomPerson currentState
           H.modify_ \state -> state
             { situation = Just situation
             , currentPerson = randPerson
             , ballPossessionHistory = cons randPerson state.ballPossessionHistory
             , status = status
+            , gameInfo = gameInfo
             }
         Nothing -> pure unit
 
@@ -246,7 +440,7 @@ handleAction = case _ of
       liftEffect $ log $ show oldState
       maybeRes <- H.liftAff getResponse
       case maybeRes of
-        Just { situation, status, quarter } -> do
+        Just { situation, status, quarter, gameInfo } -> do
           let
             oldName = maybe "" ((\(Possession { name }) -> name) <<< getPossession) oldState.situation
             (Possession { name }) = getPossession situation
@@ -260,6 +454,7 @@ handleAction = case _ of
               , currentPerson = randPerson
               , ballPossessionHistory = cons randPerson oldState.ballPossessionHistory
               , renderSurrenderButton = true
+              , gameInfo = gameInfo
               }
           else
             H.modify_ _
@@ -267,6 +462,7 @@ handleAction = case _ of
               , situation = Just situation
               , quarter = quarter
               , status = status
+              , gameInfo = gameInfo
               }
           when ((oldState.quarter /= quarter) && checkQuarter quarter oldState.winners) do
             H.modify_ \state -> state
@@ -307,7 +503,7 @@ timer val = do
     H.liftEffect $ HS.notify listener val
   pure emitter
 
-getResponse :: Aff (Maybe { situation :: Situation, clock :: String, status :: String, quarter :: Int })
+getResponse :: Aff (Maybe { situation :: Situation, clock :: String, status :: String, quarter :: Int, gameInfo :: Maybe GameInfo })
 getResponse = do
   config <- liftEffect Config.getConfig
   let gameId = Config.getGameId config
@@ -330,7 +526,17 @@ getResponse = do
             Left err -> do
               liftEffect $ log $ "ERROR: Decode failed: " <> show err <> " (" <> body <> ")"
               pure Nothing
-            Right (Response { situation, clock, status, quarter }) -> pure $ Just { situation, clock, status, quarter }
+            Right (Response { situation, clock, status, quarter, home, away, scoring }) -> do
+              let gameInfo = buildGameInfo home away scoring clock
+              pure $ Just { situation, clock, status, quarter, gameInfo }
+
+buildGameInfo :: Maybe Team -> Maybe Team -> Maybe Scoring -> String -> Maybe GameInfo
+buildGameInfo home away scoring clock = do
+  (Team { name: homeName }) <- home
+  (Team { name: awayName }) <- away
+  (Scoring { home_points, away_points, periods }) <- scoring
+  let quarterScores = map (\(Period { number, home_points: h, away_points: a }) -> { quarter: number, home: h, away: a }) periods
+  pure { homeTeam: homeName, awayTeam: awayName, homeScore: home_points, awayScore: away_points, clock, quarterScores }
 
 getResponse' :: String -> Aff (Maybe Response)
 getResponse' body = do
@@ -378,6 +584,9 @@ data Response = Response
   , situation :: Situation
   , quarter :: Int
   , status :: String
+  , home :: Maybe Team
+  , away :: Maybe Team
+  , scoring :: Maybe Scoring
   }
 derive instance Generic Response _
 
@@ -392,8 +601,79 @@ instance DecodeJson Response where
       clock <- obj .: "clock"
       quarter <- obj .: "quarter"
       status <- obj .: "status"
-      pure $ Response { situation, clock, quarter, status })
+      home <- obj .:? "home"
+      away <- obj .:? "away"
+      scoring <- obj .:? "scoring"
+      pure $ Response { situation, clock, quarter, status, home, away, scoring })
     json
+
+newtype Team = Team
+  { name :: String
+  , alias :: String
+  }
+derive instance Generic Team _
+instance Show Team where
+  show = genericShow
+instance DecodeJson Team where
+  decodeJson json = caseJsonObject
+    (Left $ TypeMismatch "object")
+    (\obj -> do
+      name <- obj .: "name"
+      alias <- obj .: "alias"
+      pure $ Team { name, alias })
+    json
+
+newtype Scoring = Scoring
+  { home_points :: Int
+  , away_points :: Int
+  , periods :: Array Period
+  }
+derive instance Generic Scoring _
+instance Show Scoring where
+  show = genericShow
+instance DecodeJson Scoring where
+  decodeJson json = caseJsonObject
+    (Left $ TypeMismatch "object")
+    (\obj -> do
+      home_points <- obj .: "home_points"
+      away_points <- obj .: "away_points"
+      periodsMaybe <- obj .:? "periods"
+      periods <- case periodsMaybe of
+        Just periodsJson -> case decodeJson periodsJson of
+          Left _ -> pure []
+          Right arr -> pure arr
+        Nothing -> pure []
+      pure $ Scoring { home_points, away_points, periods })
+    json
+
+newtype Period = Period
+  { period_type :: String
+  , number :: Int
+  , home_points :: Int
+  , away_points :: Int
+  }
+derive instance Generic Period _
+instance Show Period where
+  show = genericShow
+instance DecodeJson Period where
+  decodeJson json = caseJsonObject
+    (Left $ TypeMismatch "object")
+    (\obj -> do
+      period_type <- obj .: "period_type"
+      number <- obj .: "number"
+      home_points <- obj .: "home_points"
+      away_points <- obj .: "away_points"
+      pure $ Period { period_type, number, home_points, away_points })
+    json
+
+type GameInfo =
+  { homeTeam :: String
+  , awayTeam :: String
+  , homeScore :: Int
+  , awayScore :: Int
+  , clock :: String
+  , quarterScores :: Array { quarter :: Int, home :: Int, away :: Int }
+  }
 
 data Situation = Situation
   { situationClock :: String
