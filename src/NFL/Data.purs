@@ -17,7 +17,6 @@ data Response = Response
   , status :: String
   , home :: Maybe Team
   , away :: Maybe Team
-  , scoring :: Maybe Scoring
   }
 derive instance Generic Response _
 
@@ -34,8 +33,7 @@ instance DecodeJson Response where
       status <- obj .: "status"
       home <- obj .:? "home"
       away <- obj .:? "away"
-      scoring <- obj .:? "scoring"
-      pure $ Response { situation, clock, quarter, status, home, away, scoring })
+      pure $ Response { situation, clock, quarter, status, home, away })
     json
 
 newtype Team = Team

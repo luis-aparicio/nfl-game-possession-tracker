@@ -15,7 +15,7 @@ import Effect.Class (liftEffect)
 import Effect.Class.Console (log)
 import NFL.Data as Data
 
-getResponse :: Aff (Maybe { situation :: Data.Situation, clock :: String, status :: String, quarter :: Int, gameInfo :: Maybe Data.GameInfo })
+getResponse :: Aff (Maybe { situation :: Data.Situation, clock :: String, status :: String, quarter :: Int })
 getResponse = do
   config <- liftEffect Config.getConfig
   let gameId = Config.getGameId config
@@ -38,17 +38,8 @@ getResponse = do
             Left err -> do
               liftEffect $ log $ "ERROR: Decode failed: " <> show err <> " (" <> body <> ")"
               pure Nothing
-            Right (Data.Response { situation, clock, status, quarter, home, away, scoring }) -> do
-              let gameInfo = buildGameInfo home away scoring clock
-              pure $ Just { situation, clock, status, quarter, gameInfo }
-
-buildGameInfo :: Maybe Data.Team -> Maybe Data.Team -> Maybe Data.Scoring -> String -> Maybe Data.GameInfo
-buildGameInfo home away scoring clock = do
-  (Data.Team { name: homeName }) <- home
-  (Data.Team { name: awayName }) <- away
-  (Data.Scoring { home_points, away_points, periods }) <- scoring
-  let quarterScores = map (\(Data.Period { number, home_points: h, away_points: a }) -> { quarter: number, home: h, away: a }) periods
-  pure { homeTeam: homeName, awayTeam: awayName, homeScore: home_points, awayScore: away_points, clock, quarterScores }
+            Right (Data.Response { situation, clock, status, quarter, home, away }) -> do
+              pure $ Just { situation, clock, status, quarter }
 
 getResponse' :: String -> Aff (Maybe Data.Response)
 getResponse' body = do

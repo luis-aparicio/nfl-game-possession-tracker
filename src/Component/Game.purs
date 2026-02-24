@@ -377,14 +377,13 @@ handleAction = case _ of
       _ <- H.subscribe =<< timer Tick
       maybeRes <- H.liftAff NFLAPI.getResponse
       case maybeRes of
-        Just { situation, status, gameInfo } -> do
+        Just { situation, status } -> do
           randPerson <- liftEffect $ pickRandomPerson currentState
           H.modify_ \state -> state
             { situation = Just situation
             , currentPerson = randPerson
             , ballPossessionHistory = cons randPerson state.ballPossessionHistory
             , status = status
-            , gameInfo = gameInfo
             }
         Nothing -> pure unit
 
@@ -419,7 +418,7 @@ handleAction = case _ of
       liftEffect $ log $ show oldState
       maybeRes <- H.liftAff NFLAPI.getResponse
       case maybeRes of
-        Just { situation, status, quarter, gameInfo } -> do
+        Just { situation, status, quarter } -> do
           let
             oldName = maybe "" ((\(NFL.Possession { name }) -> name) <<< NFLAPI.getPossession) oldState.situation
             (NFL.Possession { name }) = NFLAPI.getPossession situation
@@ -433,7 +432,6 @@ handleAction = case _ of
               , currentPerson = randPerson
               , ballPossessionHistory = cons randPerson oldState.ballPossessionHistory
               , renderSurrenderButton = true
-              , gameInfo = gameInfo
               }
           else
             H.modify_ _
@@ -441,7 +439,6 @@ handleAction = case _ of
               , situation = Just situation
               , quarter = quarter
               , status = status
-              , gameInfo = gameInfo
               }
           when ((oldState.quarter /= quarter) && Winners.checkQuarter quarter oldState.winners) do
             H.modify_ \state -> state
